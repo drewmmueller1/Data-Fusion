@@ -231,6 +231,11 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         test_acc = accuracy_score(y_test, y_test_pred)
                         st.write(f"Test Accuracy: {test_acc:.3f}")
 
+                        # Train predictions
+                        y_train_pred = best_model.predict(X_train)
+                        train_acc = accuracy_score(y_train, y_train_pred)
+                        st.write(f"Train Accuracy: {train_acc:.3f}")
+
                         # Improved Confusion Matrix with heatmap if too many classes
                         if len(class_names) > 10:
                             st.warning(f"Too many classes ({len(class_names)}), showing heatmap summary instead of full matrix.")
@@ -250,7 +255,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                             st.pyplot(fig_test)
 
                         if len(class_names) > 10:
-                            cm_train = confusion_matrix(y_train, best_model.predict(X_train))
+                            cm_train = confusion_matrix(y_train, y_train_pred)
                             fig_train_cm, ax_train_cm = plt.subplots(figsize=(10, 8))
                             sns.heatmap(cm_train, annot=False, fmt='d', cmap='Blues', ax=ax_train_cm)
                             ax_train_cm.set_xlabel('Predicted')
@@ -259,7 +264,6 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                             st.pyplot(fig_train_cm)
                         else:
                             # Train Confusion Matrix
-                            y_train_pred = best_model.predict(X_train)
                             cm_train = confusion_matrix(y_train, y_train_pred)
                             fig_train, ax_train = plt.subplots(figsize=(10, 8))
                             disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
@@ -423,6 +427,11 @@ elif fusion_level == "Mid-level (PCA Scores)":
                     test_acc = accuracy_score(y_test, y_test_pred)
                     st.write(f"Test Accuracy: {test_acc:.3f}")
 
+                    # Train predictions
+                    y_train_pred = best_model.predict(X_train)
+                    train_acc = accuracy_score(y_train, y_train_pred)
+                    st.write(f"Train Accuracy: {train_acc:.3f}")
+
                     # Improved Confusion Matrix with heatmap if too many classes
                     if len(class_names) > 10:
                         st.warning(f"Too many classes ({len(class_names)}), showing heatmap summary instead of full matrix.")
@@ -442,7 +451,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         st.pyplot(fig_test)
 
                     if len(class_names) > 10:
-                        cm_train = confusion_matrix(y_train, best_model.predict(X_train))
+                        cm_train = confusion_matrix(y_train, y_train_pred)
                         fig_train_cm, ax_train_cm = plt.subplots(figsize=(10, 8))
                         sns.heatmap(cm_train, annot=False, fmt='d', cmap='Blues', ax=ax_train_cm)
                         ax_train_cm.set_xlabel('Predicted')
@@ -451,7 +460,6 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         st.pyplot(fig_train_cm)
                     else:
                         # Train Confusion Matrix
-                        y_train_pred = best_model.predict(X_train)
                         cm_train = confusion_matrix(y_train, y_train_pred)
                         fig_train, ax_train = plt.subplots(figsize=(10, 8))
                         disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
