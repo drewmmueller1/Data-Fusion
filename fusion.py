@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from io import BytesIO, StringIO
 from mlxtend.plotting import plot_decision_regions
 from matplotlib.lines import Line2D
+import seaborn as sns
 
 class PLSDA:
     def __init__(self, n_components=2):
@@ -214,7 +215,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                             param_grid = {}
 
                         if model_name == "FNN":
-                            estimator = MLPClassifier(max_iter=500, random_state=42)
+                            estimator = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1)
                         else:
                             estimator = model_cls()
                         gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
@@ -230,25 +231,45 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         test_acc = accuracy_score(y_test, y_test_pred)
                         st.write(f"Test Accuracy: {test_acc:.3f}")
 
-                        # Test Confusion Matrix
-                        cm_test = confusion_matrix(y_test, y_test_pred)
-                        fig_test, ax_test = plt.subplots()
-                        disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
-                        disp_test.plot(ax=ax_test)
-                        st.pyplot(fig_test)
+                        # Improved Confusion Matrix with heatmap if too many classes
+                        if len(class_names) > 10:
+                            st.warning(f"Too many classes ({len(class_names)}), showing heatmap summary instead of full matrix.")
+                            cm_test = confusion_matrix(y_test, y_test_pred)
+                            fig_cm, ax_cm = plt.subplots(figsize=(10, 8))
+                            sns.heatmap(cm_test, annot=False, fmt='d', cmap='Blues', ax=ax_cm)
+                            ax_cm.set_xlabel('Predicted')
+                            ax_cm.set_ylabel('True')
+                            ax_cm.set_title('Test Confusion Matrix Heatmap')
+                            st.pyplot(fig_cm)
+                        else:
+                            # Test Confusion Matrix
+                            cm_test = confusion_matrix(y_test, y_test_pred)
+                            fig_test, ax_test = plt.subplots()
+                            disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
+                            disp_test.plot(ax=ax_test, xticks_rotation=45, yticks_rotation=45)
+                            st.pyplot(fig_test)
 
-                        # Train Confusion Matrix
-                        y_train_pred = best_model.predict(X_train)
-                        cm_train = confusion_matrix(y_train, y_train_pred)
-                        fig_train, ax_train = plt.subplots()
-                        disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
-                        disp_train.plot(ax=ax_train)
-                        st.pyplot(fig_train)
+                        if len(class_names) > 10:
+                            cm_train = confusion_matrix(y_train, best_model.predict(X_train))
+                            fig_train_cm, ax_train_cm = plt.subplots(figsize=(10, 8))
+                            sns.heatmap(cm_train, annot=False, fmt='d', cmap='Blues', ax=ax_train_cm)
+                            ax_train_cm.set_xlabel('Predicted')
+                            ax_train_cm.set_ylabel('True')
+                            ax_train_cm.set_title('Train Confusion Matrix Heatmap')
+                            st.pyplot(fig_train_cm)
+                        else:
+                            # Train Confusion Matrix
+                            y_train_pred = best_model.predict(X_train)
+                            cm_train = confusion_matrix(y_train, y_train_pred)
+                            fig_train, ax_train = plt.subplots()
+                            disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
+                            disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
+                            st.pyplot(fig_train)
 
                         # Decision Boundary on 2D (fit new model on 2D with best params)
                         best_params = gs.best_params_
                         if model_name == "FNN":
-                            model_2d = MLPClassifier(max_iter=500, random_state=42, **best_params)
+                            model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
                         elif model_name == "PLS-DA":
                             model_2d = PLSDA(**best_params)
                         else:
@@ -363,7 +384,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         param_grid = {}
 
                     if model_name == "FNN":
-                        estimator = MLPClassifier(max_iter=500, random_state=42)
+                        estimator = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1)
                     else:
                         estimator = model_cls()
                     gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
@@ -379,25 +400,45 @@ elif fusion_level == "Mid-level (PCA Scores)":
                     test_acc = accuracy_score(y_test, y_test_pred)
                     st.write(f"Test Accuracy: {test_acc:.3f}")
 
-                    # Test Confusion Matrix
-                    cm_test = confusion_matrix(y_test, y_test_pred)
-                    fig_test, ax_test = plt.subplots()
-                    disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
-                    disp_test.plot(ax=ax_test)
-                    st.pyplot(fig_test)
+                    # Improved Confusion Matrix with heatmap if too many classes
+                    if len(class_names) > 10:
+                        st.warning(f"Too many classes ({len(class_names)}), showing heatmap summary instead of full matrix.")
+                        cm_test = confusion_matrix(y_test, y_test_pred)
+                        fig_cm, ax_cm = plt.subplots(figsize=(10, 8))
+                        sns.heatmap(cm_test, annot=False, fmt='d', cmap='Blues', ax=ax_cm)
+                        ax_cm.set_xlabel('Predicted')
+                        ax_cm.set_ylabel('True')
+                        ax_cm.set_title('Test Confusion Matrix Heatmap')
+                        st.pyplot(fig_cm)
+                    else:
+                        # Test Confusion Matrix
+                        cm_test = confusion_matrix(y_test, y_test_pred)
+                        fig_test, ax_test = plt.subplots()
+                        disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
+                        disp_test.plot(ax=ax_test, xticks_rotation=45, yticks_rotation=45)
+                        st.pyplot(fig_test)
 
-                    # Train Confusion Matrix
-                    y_train_pred = best_model.predict(X_train)
-                    cm_train = confusion_matrix(y_train, y_train_pred)
-                    fig_train, ax_train = plt.subplots()
-                    disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
-                    disp_train.plot(ax=ax_train)
-                    st.pyplot(fig_train)
+                    if len(class_names) > 10:
+                        cm_train = confusion_matrix(y_train, best_model.predict(X_train))
+                        fig_train_cm, ax_train_cm = plt.subplots(figsize=(10, 8))
+                        sns.heatmap(cm_train, annot=False, fmt='d', cmap='Blues', ax=ax_train_cm)
+                        ax_train_cm.set_xlabel('Predicted')
+                        ax_train_cm.set_ylabel('True')
+                        ax_train_cm.set_title('Train Confusion Matrix Heatmap')
+                        st.pyplot(fig_train_cm)
+                    else:
+                        # Train Confusion Matrix
+                        y_train_pred = best_model.predict(X_train)
+                        cm_train = confusion_matrix(y_train, y_train_pred)
+                        fig_train, ax_train = plt.subplots()
+                        disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
+                        disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
+                        st.pyplot(fig_train)
 
                     # Decision Boundary on 2D
                     best_params = gs.best_params_
                     if model_name == "FNN":
-                        model_2d = MLPClassifier(max_iter=500, random_state=42, **best_params)
+                        model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
                     elif model_name == "PLS-DA":
                         model_2d = PLSDA(**best_params)
                     else:
