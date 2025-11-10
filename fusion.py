@@ -129,115 +129,143 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
             # Fuse: concatenate horizontally
             X_fused = pd.concat([ftir_sub, msp_sub], axis=1)
             
-            # Standardize
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X_fused)
-            
-            # PCA by default
-            pca = PCA()
-            scores = pca.fit_transform(X_scaled)
-            
-            # Explained variance ratio for scree plot
-            evr = pca.explained_variance_ratio_
-            
-            # Create tabs for plots
-            tab1, tab2 = st.tabs(["Scree Plot", "PC Scores Plot"])
-            
-            with tab1:
-                fig_scree, ax_scree = plt.subplots()
-                ax_scree.plot(range(1, len(evr) + 1), np.cumsum(evr), 'bo-')
-                ax_scree.set_xlabel('Number of Components')
-                ax_scree.set_ylabel('Cumulative Explained Variance Ratio')
-                ax_scree.set_title('Scree Plot (Cumulative)')
-                st.pyplot(fig_scree)
-            
-            with tab2:
-                fig_scores, ax_scores = plt.subplots()
-                y_sex = ['male' if l[5] == 'm' else 'female' for l in common_labels]
-                colors = ['blue' if s == 'male' else 'red' for s in y_sex]
-                scatter = ax_scores.scatter(scores[:, 0], scores[:, 1], c=colors, alpha=0.7)
-                ax_scores.set_xlabel('PC1')
-                ax_scores.set_ylabel('PC2')
-                ax_scores.set_title('PCA Scores Plot (PC1 vs PC2)')
-                legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', markersize=10, label='Male'),
-                                   Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='Female')]
-                ax_scores.legend(handles=legend_elements)
-                st.pyplot(fig_scores)
-            
             # Fused data option
             st.subheader("Fused Data")
             st.dataframe(X_fused)
             csv = X_fused.to_csv()
             st.download_button("Download Fused CSV", csv, "fused_data.csv")
 
-            # ML Section
-            st.subheader("Machine Learning Evaluation")
+            # Target selection for visualization and ML
             target = st.selectbox("Select Target", ["Individual", "Sex", "Age"])
-            selected_models = st.multiselect("Select Models", list(models_dict.keys()))
 
-            if st.button("Run ML Evaluation") and len(selected_models) > 0:
-                ml_data = run_ml(X_fused, common_labels, target)
-                if ml_data[0] is None:
-                    st.stop()
+            def parse_target(label, t_type):
+                base = label.rsplit('_', 1)[0] if '_' in label else label
+                date = base[:5]
+                sex = base[5]
+                age_str = base[6:]
+                try:
+                    age = int(age_str)
+                except ValueError:
+                    age = None
+                if t_type == "Individual":
+                    return date
+                elif t_type == "Sex":
+                    return 'male' if sex == 'm' else 'female'
+                elif t_type == "Age":
+                    if age is None:
+                        return 'unknown'
+                    return age
+                return 'unknown'
 
-                X_train, X_test, y_train, y_test, X_2d_train, class_names, X_2d = ml_data
+            y_str = [parse_target(l, target) for l in common_labels]
+            if 'unknown' in set(y_str):
+                st.error("Some labels have invalid format for selected target.")
+            else:
+                le = LabelEncoder()
+                y_encoded = le.fit_transform(y_str)
 
-                for model_name in selected_models:
-                    st.header(f"Results for {model_name}")
-                    model_cls, param_grid = models_dict[model_name]
+                # Scale
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(X_fused)
 
-                    if not param_grid:
-                        param_grid = {}
+                # PCA for visualization (2 components)
+                pca_2d = PCA(n_components=2)
+                scores = pca_2d.fit_transform(X_scaled)
 
-                    if model_name == "FNN":
-                        estimator = MLPClassifier(max_iter=500, random_state=42, **{k: v for k, v in param_grid.items() if k not in ['max_iter', 'random_state']})
-                        # param_grid remains for search
-                    else:
-                        estimator = model_cls(**{k: v for k, v in param_grid.items() if callable(v) or not isinstance(v, (list, tuple))}) if param_grid else model_cls()
-                    gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
-                    gs.fit(X_train, y_train)
+                # Full PCA for scree
+                pca_full = PCA()
+                pca_full.fit(X_scaled)
+                evr = pca_full.explained_variance_ratio_
 
-                    st.write(f"Best Parameters: {gs.best_params_}")
-                    st.write(f"Cross-Validation Accuracy: {gs.best_score_:.3f}")
+                # Create tabs for plots
+                tab1, tab2 = st.tabs(["Scree Plot", "PC Scores Plot"])
 
-                    best_model = gs.best_estimator_
+                with tab1:
+                    fig_scree, ax_scree = plt.subplots()
+                    ax_scree.plot(range(1, len(evr) + 1), np.cumsum(evr), 'bo-')
+                    ax_scree.set_xlabel('Number of Components')
+                    ax_scree.set_ylabel('Cumulative Explained Variance Ratio')
+                    ax_scree.set_title('Scree Plot (Cumulative)')
+                    st.pyplot(fig_scree)
 
-                    # Test predictions
-                    y_test_pred = best_model.predict(X_test)
-                    test_acc = accuracy_score(y_test, y_test_pred)
-                    st.write(f"Test Accuracy: {test_acc:.3f}")
+                with tab2:
+                    fig_scores, ax_scores = plt.subplots()
+                    scatter = ax_scores.scatter(scores[:, 0], scores[:, 1], c=y_encoded, cmap='tab10', alpha=0.7)
+                    ax_scores.set_xlabel('PC1')
+                    ax_scores.set_ylabel('PC2')
+                    ax_scores.set_title(f'PCA Scores Plot (PC1 vs PC2) - Colored by {target}')
+                    legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
+                                              markerfacecolor=plt.cm.tab10(i / len(le.classes_)), markersize=10)
+                                       for i, cls in enumerate(le.classes_)]
+                    ax_scores.legend(handles=legend_elements)
+                    st.pyplot(fig_scores)
 
-                    # Test Confusion Matrix
-                    cm_test = confusion_matrix(y_test, y_test_pred)
-                    fig_test, ax_test = plt.subplots()
-                    disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
-                    disp_test.plot(ax=ax_test)
-                    st.pyplot(fig_test)
+                # ML Section
+                st.subheader("Machine Learning Evaluation")
+                selected_models = st.multiselect("Select Models", list(models_dict.keys()))
 
-                    # Train Confusion Matrix
-                    y_train_pred = best_model.predict(X_train)
-                    cm_train = confusion_matrix(y_train, y_train_pred)
-                    fig_train, ax_train = plt.subplots()
-                    disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
-                    disp_train.plot(ax=ax_train)
-                    st.pyplot(fig_train)
+                if st.button("Run ML Evaluation") and len(selected_models) > 0:
+                    ml_data = run_ml(X_fused, common_labels, target)
+                    if ml_data[0] is None:
+                        st.stop()
 
-                    # Decision Boundary on 2D (fit new model on 2D with best params)
-                    best_params = gs.best_params_
-                    if model_name == "FNN":
-                        model_2d = MLPClassifier(max_iter=500, random_state=42, **best_params)
-                    elif model_name == "PLS-DA":
-                        model_2d = PLSDA(**best_params)
-                    else:
-                        model_2d = model_cls(**best_params)
-                    model_2d.fit(X_2d_train, y_train)
+                    X_train, X_test, y_train, y_test, X_2d_train, class_names, X_2d = ml_data
 
-                    fig_db, ax_db = plt.subplots(figsize=(8, 6))
-                    plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_db)
-                    ax_db.set_xlabel('PC1')
-                    ax_db.set_ylabel('PC2')
-                    ax_db.set_title(f'Decision Boundary for {model_name} (on PCA 2D)')
-                    st.pyplot(fig_db)
+                    for model_name in selected_models:
+                        st.header(f"Results for {model_name}")
+                        model_cls, param_grid = models_dict[model_name]
+
+                        if not param_grid:
+                            param_grid = {}
+
+                        if model_name == "FNN":
+                            estimator = MLPClassifier(max_iter=500, random_state=42)
+                        else:
+                            estimator = model_cls()
+                        gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+                        gs.fit(X_train, y_train)
+
+                        st.write(f"Best Parameters: {gs.best_params_}")
+                        st.write(f"Cross-Validation Accuracy: {gs.best_score_:.3f}")
+
+                        best_model = gs.best_estimator_
+
+                        # Test predictions
+                        y_test_pred = best_model.predict(X_test)
+                        test_acc = accuracy_score(y_test, y_test_pred)
+                        st.write(f"Test Accuracy: {test_acc:.3f}")
+
+                        # Test Confusion Matrix
+                        cm_test = confusion_matrix(y_test, y_test_pred)
+                        fig_test, ax_test = plt.subplots()
+                        disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
+                        disp_test.plot(ax=ax_test)
+                        st.pyplot(fig_test)
+
+                        # Train Confusion Matrix
+                        y_train_pred = best_model.predict(X_train)
+                        cm_train = confusion_matrix(y_train, y_train_pred)
+                        fig_train, ax_train = plt.subplots()
+                        disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
+                        disp_train.plot(ax=ax_train)
+                        st.pyplot(fig_train)
+
+                        # Decision Boundary on 2D (fit new model on 2D with best params)
+                        best_params = gs.best_params_
+                        if model_name == "FNN":
+                            model_2d = MLPClassifier(max_iter=500, random_state=42, **best_params)
+                        elif model_name == "PLS-DA":
+                            model_2d = PLSDA(**best_params)
+                        else:
+                            model_2d = model_cls(**best_params)
+                        model_2d.fit(X_2d_train, y_train)
+
+                        fig_db, ax_db = plt.subplots(figsize=(8, 6))
+                        plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_db)
+                        ax_db.set_xlabel('PC1')
+                        ax_db.set_ylabel('PC2')
+                        ax_db.set_title(f'Decision Boundary for {model_name} (on PCA 2D)')
+                        st.pyplot(fig_db)
 
 elif fusion_level == "Mid-level (PCA Scores)":
     st.header("Mid-level Fusion: Upload PCA Scores")
@@ -251,9 +279,9 @@ elif fusion_level == "Mid-level (PCA Scores)":
         
         # Set index to labels (last column), select numeric PCs (previous columns)
         label_col = ftir_pc_df.columns[-1]
-        ftir_pc_idx = ftir_pc_df.set_index(label_col).select_dtypes(include=[np.number])
+        ftir_pc_idx = ftir_pc_df.set_index(label_col).select_dtypes(include=[np.number]).groupby(level=0).mean()
         label_col_msp = msp_pc_df.columns[-1]
-        msp_pc_idx = msp_pc_df.set_index(label_col_msp).select_dtypes(include=[np.number])
+        msp_pc_idx = msp_pc_df.set_index(label_col_msp).select_dtypes(include=[np.number]).groupby(level=0).mean()
         
         # Find exact matching labels for 1:1
         common_labels = ftir_pc_idx.index.intersection(msp_pc_idx.index)
@@ -288,9 +316,11 @@ elif fusion_level == "Mid-level (PCA Scores)":
             csv_mid = X_fused.to_csv()
             st.download_button("Download Fused Mid-level CSV", csv_mid, "fused_midlevel.csv")
 
+            # Target selection for ML
+            target = st.selectbox("Select Target", ["Individual", "Sex", "Age"])
+
             # ML Section (same as low-level)
             st.subheader("Machine Learning Evaluation")
-            target = st.selectbox("Select Target", ["Individual", "Sex", "Age"])
             selected_models = st.multiselect("Select Models", list(models_dict.keys()))
 
             if st.button("Run ML Evaluation") and len(selected_models) > 0:
@@ -308,9 +338,9 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         param_grid = {}
 
                     if model_name == "FNN":
-                        estimator = MLPClassifier(max_iter=500, random_state=42, **{k: v for k, v in param_grid.items() if k not in ['max_iter', 'random_state']})
+                        estimator = MLPClassifier(max_iter=500, random_state=42)
                     else:
-                        estimator = model_cls(**{k: v for k, v in param_grid.items() if callable(v) or not isinstance(v, (list, tuple))}) if param_grid else model_cls()
+                        estimator = model_cls()
                     gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
                     gs.fit(X_train, y_train)
 
