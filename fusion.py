@@ -40,38 +40,10 @@ fusion_level = st.radio("Select Fusion Level:", ["Low-level (Preprocessed Spectr
 
 # Shared ML section function
 @st.cache_data
-def run_ml(X_fused, common_labels, target_type):
-    if len(common_labels) < 10:
-        st.warning("Few samples; results may not be reliable.")
+def run_ml(X_fused, y_encoded, class_names):
+    if len(class_names) < 2:
+        st.warning("Less than 2 classes; classification not meaningful.")
         return None, None, None, None, None, None, None
-
-    def parse_target(label, t_type):
-        base = label.rsplit('_', 1)[0] if '_' in label else label
-        date = base[:5]
-        sex = base[5]
-        age_str = base[6:]
-        try:
-            age = int(age_str)
-        except ValueError:
-            age = None
-        if t_type == "Individual":
-            return date
-        elif t_type == "Sex":
-            return 'male' if sex == 'm' else 'female'
-        elif t_type == "Age":
-            if age is None:
-                return 'unknown'
-            return age
-        return 'unknown'
-
-    y_str = [parse_target(l, target_type) for l in common_labels]
-    y_series = pd.Series(y_str, index=common_labels)
-    if 'unknown' in set(y_series.values):
-        st.error("Some labels have invalid format.")
-        return None, None, None, None, None, None, None
-
-    le = LabelEncoder()
-    y_encoded = le.fit_transform(y_series)
 
     # Scale and PCA for ML (10 components)
     scaler = StandardScaler()
@@ -88,7 +60,7 @@ def run_ml(X_fused, common_labels, target_type):
     X_train, X_test, y_train, y_test = train_test_split(X_ml, y_encoded, test_size=0.2, stratify=y_encoded, random_state=42)
     X_2d_train, X_2d_test, _, _ = train_test_split(X_2d, y_encoded, test_size=0.2, stratify=y_encoded, random_state=42)
 
-    return X_train, X_test, y_train, y_test, X_2d_train, le.classes_, X_2d
+    return X_train, X_test, y_train, y_test, X_2d_train, class_names, X_2d
 
 # Model definitions
 models_dict = {
@@ -163,6 +135,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
             else:
                 le = LabelEncoder()
                 y_encoded = le.fit_transform(y_str)
+                class_names = le.classes_
 
                 # Scale
                 scaler = StandardScaler()
@@ -195,8 +168,8 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                     ax_scores.set_ylabel('PC2')
                     ax_scores.set_title(f'PCA Scores Plot (PC1 vs PC2) - Colored by {target}')
                     legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
-                                              markerfacecolor=plt.cm.tab10(i / len(le.classes_)), markersize=10)
-                                       for i, cls in enumerate(le.classes_)]
+                                              markerfacecolor=plt.cm.tab10(i / len(class_names)), markersize=10)
+                                       for i, cls in enumerate(class_names)]
                     ax_scores.legend(handles=legend_elements)
                     st.pyplot(fig_scores)
 
@@ -205,7 +178,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                 selected_models = st.multiselect("Select Models", list(models_dict.keys()))
 
                 if st.button("Run ML Evaluation") and len(selected_models) > 0:
-                    ml_data = run_ml(X_fused, common_labels, target)
+                    ml_data = run_ml(X_fused, y_encoded, class_names)
                     if ml_data[0] is None:
                         st.stop()
 
@@ -277,54 +250,73 @@ elif fusion_level == "Mid-level (PCA Scores)":
         ftir_pc_df = pd.read_csv(ftir_pc_file)
         msp_pc_df = pd.read_csv(msp_pc_file)
         
-        # Set index to labels (last column), select numeric PCs (previous columns)
-        label_col = ftir_pc_df.columns[-1]
-        ftir_pc_idx = ftir_pc_df.set_index(label_col).select_dtypes(include=[np.number]).groupby(level=0).mean()
-        label_col_msp = msp_pc_df.columns[-1]
-        msp_pc_idx = msp_pc_df.set_index(label_col_msp).select_dtypes(include=[np.number]).groupby(level=0).mean()
+        # Extract numeric PCs and labels
+        ftir_numeric = ftir_pc_df.iloc[:, :-1].select_dtypes(include=[np.number])
+        ftir_labels = ftir_pc_df.iloc[:, -1]
         
-        # Find exact matching labels for 1:1
-        common_labels = ftir_pc_idx.index.intersection(msp_pc_idx.index)
+        msp_numeric = msp_pc_df.iloc[:, :-1].select_dtypes(include=[np.number])
+        msp_labels = msp_pc_df.iloc[:, -1]
+        
+        # Sort by labels to align
+        sort_idx_f = ftir_labels.argsort()
+        ftir_numeric_sorted = ftir_numeric.iloc[sort_idx_f].reset_index(drop=True)
+        ftir_labels_sorted = ftir_labels.iloc[sort_idx_f].reset_index(drop=True)
+        
+        sort_idx_m = msp_labels.argsort()
+        msp_numeric_sorted = msp_numeric.iloc[sort_idx_m].reset_index(drop=True)
+        msp_labels_sorted = msp_labels.iloc[sort_idx_m].reset_index(drop=True)
+        
+        # Take min length to match
+        min_len = min(len(ftir_labels_sorted), len(msp_labels_sorted))
+        ftir_sub = ftir_numeric_sorted.iloc[:min_len]
+        msp_sub = msp_numeric_sorted.iloc[:min_len]
+        common_labels = ftir_labels_sorted.iloc[:min_len].values
+        
         if len(common_labels) == 0:
-            st.error("No matching labels found.")
+            st.error("No matching samples after alignment.")
         else:
-            st.info(f"Found {len(common_labels)} common samples.")
+            st.info(f"Found {len(common_labels)} aligned samples.")
             
-            ftir_sub = ftir_pc_idx.loc[common_labels]
-            msp_sub = msp_pc_idx.loc[common_labels]
+            # Fuse: concatenate horizontally
+            X_fused = pd.concat([ftir_sub, msp_sub], axis=1)
+            X_fused['label'] = common_labels
             
-            # Plot MSP PC1 (column 2, 0-based index 1) vs FTIR PC1 (column 2, index 1), colored by sex
-            if ftir_sub.shape[1] > 1 and msp_sub.shape[1] > 1:
+            # Plot MSP PC1 vs FTIR PC1, colored by label
+            if ftir_sub.shape[1] > 0 and len(common_labels) > 0:
                 fig, ax = plt.subplots(figsize=(8, 6))
-                y_sex = ['male' if l[5] == 'm' else 'female' for l in common_labels]
-                colors = ['blue' if s == 'male' else 'red' for s in y_sex]
-                scatter = ax.scatter(msp_sub.iloc[:, 1], ftir_sub.iloc[:, 1], c=colors, alpha=0.7)
+                ftir_pc1 = ftir_sub.iloc[:, 0]
+                msp_pc1 = msp_sub.iloc[:, 0]
+                le_temp = LabelEncoder()
+                colors = le_temp.fit_transform(common_labels)
+                scatter = ax.scatter(msp_pc1, ftir_pc1, c=colors, cmap='tab10', alpha=0.7)
                 ax.set_xlabel('MSP PC1')
                 ax.set_ylabel('FTIR PC1')
-                ax.set_title('MSP PC1 vs FTIR PC1')
-                legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', markersize=10, label='Male'),
-                                   Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='Female')]
+                ax.set_title('MSP PC1 vs FTIR PC1 - Colored by Label')
+                legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
+                                          markerfacecolor=plt.cm.tab10(i / len(le_temp.classes_)), markersize=10)
+                                   for i, cls in enumerate(le_temp.classes_)]
                 ax.legend(handles=legend_elements)
                 st.pyplot(fig)
             else:
-                st.warning("Insufficient PC columns for plotting PC1 (column 2).")
+                st.warning("Insufficient columns for plotting PC1.")
             
-            # Show fused mid-level data (concat PCs)
-            X_fused = pd.concat([ftir_sub, msp_sub], axis=1)
+            # Show fused mid-level data
             st.subheader("Fused Mid-level Data")
             st.dataframe(X_fused)
             csv_mid = X_fused.to_csv()
             st.download_button("Download Fused Mid-level CSV", csv_mid, "fused_midlevel.csv")
 
-            # Target selection for ML
-            target = st.selectbox("Select Target", ["Individual", "Sex", "Age"])
+            # Prepare y for ML
+            le = LabelEncoder()
+            y_encoded = le.fit_transform(common_labels)
+            class_names = le.classes_
 
-            # ML Section (same as low-level)
+            # ML Section
             st.subheader("Machine Learning Evaluation")
             selected_models = st.multiselect("Select Models", list(models_dict.keys()))
 
             if st.button("Run ML Evaluation") and len(selected_models) > 0:
-                ml_data = run_ml(X_fused, common_labels, target)
+                ml_data = run_ml(X_fused.iloc[:, :-1], y_encoded, class_names)  # Exclude label column
                 if ml_data[0] is None:
                     st.stop()
 
