@@ -48,8 +48,7 @@ def run_ml(X_fused, common_labels, target_type):
     def parse_target(label, t_type):
         date = label[:5]
         sex = label[5]
-        age_str = label[6:]
-        age = int(age_str)
+        age = int(label[6:])
         if t_type == "Individual":
             return date
         elif t_type == "Sex":
@@ -86,17 +85,17 @@ def run_ml(X_fused, common_labels, target_type):
 
 # Model definitions
 models_dict = {
-    "LDA": (LinearDiscriminantAnalysis(), {}),
-    "PLS-DA": (PLSDA(), {'n_components': [1, 2, 3, 5]}),
-    "KNN": (KNeighborsClassifier(), {'n_neighbors': [3, 5, 7, 9]}),
-    "FNN": (MLPClassifier(max_iter=500, random_state=42), {'hidden_layer_sizes': [(50,), (100,)], 'alpha': [0.0001, 0.001]})
+    "LDA": (LinearDiscriminantAnalysis, {}),
+    "PLS-DA": (PLSDA, {'n_components': [1, 2, 3, 5]}),
+    "KNN": (KNeighborsClassifier, {'n_neighbors': [3, 5, 7, 9]}),
+    "FNN": (MLPClassifier, {'hidden_layer_sizes': [(50,), (100,)], 'alpha': [0.0001, 0.001]})
 }
 
 def group_by_base_label(features_df):
     def get_base_label(label):
         return label.rsplit('_', 1)[0] if '_' in label else label
     features_df['base_label'] = features_df.index.map(get_base_label)
-    grouped = features_df.groupby('base_label').mean().drop('base_label', axis=1)
+    grouped = features_df.groupby('base_label').mean()
     grouped.index.name = 'label'
     return grouped
 
@@ -198,7 +197,11 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                     if not param_grid:
                         param_grid = {}
 
-                    gs = GridSearchCV(model_cls, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+                    if model_name == "FNN":
+                        estimator = MLPClassifier(max_iter=500, random_state=42)
+                    else:
+                        estimator = model_cls
+                    gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
                     gs.fit(X_train, y_train)
 
                     st.write(f"Best Parameters: {gs.best_params_}")
@@ -228,10 +231,12 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
 
                     # Decision Boundary on 2D (fit new model on 2D with best params)
                     best_params = gs.best_params_
-                    if model_name == "PLS-DA":
+                    if model_name == "FNN":
+                        model_2d = MLPClassifier(max_iter=500, random_state=42, **best_params)
+                    elif model_name == "PLS-DA":
                         model_2d = PLSDA(**best_params)
                     else:
-                        model_2d = type(model_cls())(**best_params)
+                        model_2d = model_cls(**best_params)
                     model_2d.fit(X_2d_train, y_train)
 
                     fig_db, ax_db = plt.subplots(figsize=(8, 6))
@@ -317,7 +322,11 @@ elif fusion_level == "Mid-level (PCA Scores)":
                     if not param_grid:
                         param_grid = {}
 
-                    gs = GridSearchCV(model_cls, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+                    if model_name == "FNN":
+                        estimator = MLPClassifier(max_iter=500, random_state=42)
+                    else:
+                        estimator = model_cls
+                    gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
                     gs.fit(X_train, y_train)
 
                     st.write(f"Best Parameters: {gs.best_params_}")
@@ -347,10 +356,12 @@ elif fusion_level == "Mid-level (PCA Scores)":
 
                     # Decision Boundary on 2D
                     best_params = gs.best_params_
-                    if model_name == "PLS-DA":
+                    if model_name == "FNN":
+                        model_2d = MLPClassifier(max_iter=500, random_state=42, **best_params)
+                    elif model_name == "PLS-DA":
                         model_2d = PLSDA(**best_params)
                     else:
-                        model_2d = type(model_cls())(**best_params)
+                        model_2d = model_cls(**best_params)
                     model_2d.fit(X_2d_train, y_train)
 
                     fig_db, ax_db = plt.subplots(figsize=(8, 6))
