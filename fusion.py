@@ -385,11 +385,19 @@ elif fusion_level == "Mid-level (PCA Scores)":
             selected_models = st.multiselect("Select Models", list(models_dict.keys()))
 
             if st.button("Run ML Evaluation") and len(selected_models) > 0:
-                ml_data = run_ml(X_fused.iloc[:, :-1], y_encoded, class_names)  # Exclude label column
-                if ml_data[0] is None:
-                    st.stop()
+                # For mid-level, use MSP PC1 vs FTIR PC1 as 2D space for decision boundary
+                X_2d = np.column_stack((msp_sub.iloc[:, 0].values, ftir_sub.iloc[:, 0].values))
+                X_2d_train, X_2d_test, _, _ = train_test_split(X_2d, y_encoded, test_size=0.2, stratify=y_encoded, random_state=42)
 
-                X_train, X_test, y_train, y_test, X_2d_train, class_names, X_2d = ml_data
+                # Scale and PCA for ML (10 components)
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(X_fused.iloc[:, :-1])  # Exclude label
+                n_comp_ml = min(10, X_fused.shape[0] - 1, X_fused.shape[1] - 1)
+                pca_ml = PCA(n_components=n_comp_ml)
+                X_ml = pca_ml.fit_transform(X_scaled)
+
+                # Split for higher dims
+                X_train, X_test, y_train, y_test = train_test_split(X_ml, y_encoded, test_size=0.2, stratify=y_encoded, random_state=42)
 
                 for model_name in selected_models:
                     st.header(f"Results for {model_name}")
@@ -450,7 +458,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
                         st.pyplot(fig_train)
 
-                    # Decision Boundary on 2D (fit new model on 2D with best params) - no labels on main plot
+                    # Decision Boundary on MSP PC1 vs FTIR PC1 (no labels on main plot)
                     best_params = gs.best_params_
                     if model_name == "FNN":
                         model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
@@ -462,9 +470,9 @@ elif fusion_level == "Mid-level (PCA Scores)":
 
                     fig_db, ax_db = plt.subplots(figsize=(8, 6))
                     plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_db)
-                    ax_db.set_xlabel('PC1')
-                    ax_db.set_ylabel('PC2')
-                    ax_db.set_title(f'Decision Boundary for {model_name} (on PCA 2D)')
+                    ax_db.set_xlabel('MSP PC1')
+                    ax_db.set_ylabel('FTIR PC1')
+                    ax_db.set_title(f'Decision Boundary for {model_name} (MSP PC1 vs FTIR PC1)')
                     st.pyplot(fig_db)
 
                     # Option for labeled decision boundary plot image
@@ -473,9 +481,9 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_labeled_db)
                         for i, (x1, x2) in enumerate(X_2d_train):
                             ax_labeled_db.annotate(common_labels[i], (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
-                        ax_labeled_db.set_xlabel('PC1')
-                        ax_labeled_db.set_ylabel('PC2')
-                        ax_labeled_db.set_title(f'Labeled Decision Boundary for {model_name} (on PCA 2D)')
+                        ax_labeled_db.set_xlabel('MSP PC1')
+                        ax_labeled_db.set_ylabel('FTIR PC1')
+                        ax_labeled_db.set_title(f'Labeled Decision Boundary for {model_name} (MSP PC1 vs FTIR PC1)')
                         buf_db = BytesIO()
                         fig_labeled_db.savefig(buf_db, format='png', bbox_inches='tight')
                         buf_db.seek(0)
