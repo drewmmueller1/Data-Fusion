@@ -12,6 +12,7 @@ from sklearn.cross_decomposition import PLSRegression
 import matplotlib.pyplot as plt
 from io import StringIO
 from mlxtend.plotting import plot_decision_regions
+from matplotlib.lines import Line2D
 
 class PLSDA:
     def __init__(self, n_components=2):
@@ -23,17 +24,13 @@ class PLSDA:
     def fit(self, X, y):
         self.classes_ = np.unique(y)
         y_encoded = self.le_.fit_transform(y)
-        if len(self.classes_) == 2:
-            y_dummy = y_encoded.reshape(-1, 1)  # For binary, use as is since 0/1
-        else:
-            # Assume binary for now
-            y_dummy = y_encoded.reshape(-1, 1)
+        y_dummy = pd.get_dummies(y_encoded).values
         self.pls.fit(X, y_dummy)
         return self
 
     def predict(self, X):
         y_pred_prob = self.pls.predict(X)
-        y_pred_encoded = (y_pred_prob > 0.5).astype(int).flatten()
+        y_pred_encoded = np.argmax(y_pred_prob, axis=1)
         y_pred = self.le_.inverse_transform(y_pred_encoded)
         return y_pred
 
@@ -43,24 +40,32 @@ fusion_level = st.radio("Select Fusion Level:", ["Low-level (Preprocessed Spectr
 
 # Shared ML section function
 @st.cache_data
-def run_ml(X_fused, common_labels):
+def run_ml(X_fused, common_labels, target_type):
     if len(common_labels) < 10:
         st.warning("Few samples; results may not be reliable.")
-        return None, None, None, None, None
+        return None, None, None, None, None, None, None
 
-    # Parse target: Sex (binary)
-    def parse_sex(label):
-        if len(label) > 6 and label[6] in ['m', 'f']:
-            return 'male' if label[6] == 'm' else 'female'
-        return 'unknown'  # Handle invalid
+    def parse_target(label, t_type):
+        date = label[:5]
+        sex = label[5]
+        age_str = label[6:]
+        age = int(age_str)
+        if t_type == "Individual":
+            return date
+        elif t_type == "Sex":
+            return 'male' if sex == 'm' else 'female'
+        elif t_type == "Age":
+            return age
+        return 'unknown'
 
-    y_str = pd.Series([parse_sex(l) for l in common_labels], index=common_labels)
-    if 'unknown' in y_str.values:
-        st.error("Some labels have invalid format for sex parsing.")
-        return None, None, None, None, None
+    y_str = [parse_target(l, target_type) for l in common_labels]
+    y_series = pd.Series(y_str, index=common_labels)
+    if 'unknown' in y_series.values:
+        st.error("Some labels have invalid format.")
+        return None, None, None, None, None, None, None
 
     le = LabelEncoder()
-    y_encoded = le.fit_transform(y_str)
+    y_encoded = le.fit_transform(y_series)
 
     # Scale and PCA for ML (10 components)
     scaler = StandardScaler()
@@ -82,17 +87,23 @@ def run_ml(X_fused, common_labels):
 # Model definitions
 models_dict = {
     "LDA": (LinearDiscriminantAnalysis(), {}),
-    "PLS-DA": (PLSDA(), {'n_components': [2, 3, 5]}),
+    "PLS-DA": (PLSDA(), {'n_components': [1, 2, 3, 5]}),
     "KNN": (KNeighborsClassifier(), {'n_neighbors': [3, 5, 7, 9]}),
     "FNN": (MLPClassifier(max_iter=500, random_state=42), {'hidden_layer_sizes': [(50,), (100,)], 'alpha': [0.0001, 0.001]})
 }
+
+def group_by_base_label(features_df):
+    def get_base_label(label):
+        return label.rsplit('_', 1)[0] if '_' in label else label
+    features_df['base_label'] = features_df.index.map(get_base_label)
+    grouped = features_df.groupby('base_label').mean().drop('base_label', axis=1)
+    grouped.index.name = 'label'
+    return grouped
 
 if fusion_level == "Low-level (Preprocessed Spectra)":
     st.header("Low-level Fusion: Upload Preprocessed Spectra")
     ftir_file = st.file_uploader("Upload FTIR Spectra CSV (rows: samples/labels, columns: features)", type="csv")
     msp_file = st.file_uploader("Upload MSP Spectra CSV (rows: samples/labels, columns: features)", type="csv")
-    
-    run_pca = st.checkbox("Run PCA on Fused Data")
     
     if ftir_file is not None and msp_file is not None:
         # Read CSVs, assuming first column is 'label', rest are features
@@ -105,19 +116,23 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
         if 'label' not in msp_df.columns:
             msp_df.insert(0, 'label', msp_df.index.astype(str))
         
-        # Set label as index for merging
+        # Set label as index for grouping
         ftir_features = ftir_df.set_index('label').select_dtypes(include=[np.number])
         msp_features = msp_df.set_index('label').select_dtypes(include=[np.number])
         
-        # Find common labels
-        common_labels = ftir_features.index.intersection(msp_features.index)
+        # Group by base label (exclude replicate)
+        ftir_grouped = group_by_base_label(ftir_features)
+        msp_grouped = group_by_base_label(msp_features)
+        
+        # Find common base labels
+        common_labels = ftir_grouped.index.intersection(msp_grouped.index)
         if len(common_labels) == 0:
-            st.error("No matching labels found between FTIR and MSP files.")
+            st.error("No matching base labels found between FTIR and MSP files.")
         else:
-            st.info(f"Found {len(common_labels)} common samples.")
+            st.info(f"Found {len(common_labels)} common base samples after grouping.")
             
-            ftir_sub = ftir_features.loc[common_labels]
-            msp_sub = msp_features.loc[common_labels]
+            ftir_sub = ftir_grouped.loc[common_labels]
+            msp_sub = msp_grouped.loc[common_labels]
             
             # Fuse: concatenate horizontally
             X_fused = pd.concat([ftir_sub, msp_sub], axis=1)
@@ -126,60 +141,50 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(X_fused)
             
-            if run_pca:
-                pca = PCA()
-                scores = pca.fit_transform(X_scaled)
-                
-                # Explained variance ratio for scree plot
-                evr = pca.explained_variance_ratio_
-                
-                # Create tabs for plots
-                tab1, tab2, tab3 = st.tabs(["Scree Plot", "PC Scores Plot", "Factor Loadings"])
-                
-                with tab1:
-                    fig_scree, ax_scree = plt.subplots()
-                    ax_scree.plot(range(1, len(evr) + 1), np.cumsum(evr), 'bo-')
-                    ax_scree.set_xlabel('Number of Components')
-                    ax_scree.set_ylabel('Cumulative Explained Variance Ratio')
-                    ax_scree.set_title('Scree Plot (Cumulative)')
-                    st.pyplot(fig_scree)
-                
-                with tab2:
-                    fig_scores, ax_scores = plt.subplots()
-                    scatter = ax_scores.scatter(scores[:, 0], scores[:, 1], c=range(len(common_labels)), cmap='viridis')
-                    ax_scores.set_xlabel('PC1')
-                    ax_scores.set_ylabel('PC2')
-                    ax_scores.set_title('PCA Scores Plot (PC1 vs PC2)')
-                    st.pyplot(fig_scores)
-                
-                with tab3:
-                    # Loadings: for first few PCs, plot vs variables (need variable names)
-                    n_vars = X_fused.shape[1]
-                    var_names = list(X_fused.columns[:min(50, n_vars)])  # Limit for plot
-                    loadings_pc1 = pca.components_[0, :len(var_names)]
-                    
-                    fig_load, ax_load = plt.subplots()
-                    ax_load.bar(range(len(var_names)), loadings_pc1)
-                    ax_load.set_xlabel('Variables')
-                    ax_load.set_ylabel('Loadings (PC1)')
-                    ax_load.set_title('Factor Loadings for PC1')
-                    ax_load.set_xticks(range(0, len(var_names), 10))
-                    ax_load.set_xticklabels([var_names[i] for i in range(0, len(var_names), 10)], rotation=45)
-                    st.pyplot(fig_load)
-                
-                # Download fused data option
-                st.subheader("Fused Data")
-                st.dataframe(X_fused)
-                csv = X_fused.to_csv()
-                st.download_button("Download Fused CSV", csv, "fused_data.csv")
+            # PCA by default
+            pca = PCA()
+            scores = pca.fit_transform(X_scaled)
+            
+            # Explained variance ratio for scree plot
+            evr = pca.explained_variance_ratio_
+            
+            # Create tabs for plots
+            tab1, tab2 = st.tabs(["Scree Plot", "PC Scores Plot"])
+            
+            with tab1:
+                fig_scree, ax_scree = plt.subplots()
+                ax_scree.plot(range(1, len(evr) + 1), np.cumsum(evr), 'bo-')
+                ax_scree.set_xlabel('Number of Components')
+                ax_scree.set_ylabel('Cumulative Explained Variance Ratio')
+                ax_scree.set_title('Scree Plot (Cumulative)')
+                st.pyplot(fig_scree)
+            
+            with tab2:
+                fig_scores, ax_scores = plt.subplots()
+                y_sex = ['male' if l[5] == 'm' else 'female' for l in common_labels]
+                colors = ['blue' if s == 'male' else 'red' for s in y_sex]
+                scatter = ax_scores.scatter(scores[:, 0], scores[:, 1], c=colors, alpha=0.7)
+                ax_scores.set_xlabel('PC1')
+                ax_scores.set_ylabel('PC2')
+                ax_scores.set_title('PCA Scores Plot (PC1 vs PC2)')
+                legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', markersize=10, label='Male'),
+                                   Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='Female')]
+                ax_scores.legend(handles=legend_elements)
+                st.pyplot(fig_scores)
+            
+            # Fused data option
+            st.subheader("Fused Data")
+            st.dataframe(X_fused)
+            csv = X_fused.to_csv()
+            st.download_button("Download Fused CSV", csv, "fused_data.csv")
 
             # ML Section
             st.subheader("Machine Learning Evaluation")
-            target = st.selectbox("Select Target", ["Sex"])
+            target = st.selectbox("Select Target", ["Individual", "Sex", "Age"])
             selected_models = st.multiselect("Select Models", list(models_dict.keys()))
 
             if st.button("Run ML Evaluation") and len(selected_models) > 0:
-                ml_data = run_ml(X_fused, common_labels)
+                ml_data = run_ml(X_fused, common_labels, target)
                 if ml_data[0] is None:
                     st.stop()
 
@@ -223,10 +228,11 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
 
                     # Decision Boundary on 2D (fit new model on 2D with best params)
                     best_params = gs.best_params_
-                    model_2d = type(model_cls)(**best_params) if hasattr(model_cls, '__init__') else model_cls()
-                    if isinstance(model_2d, PLSDA):
+                    if model_name == "PLS-DA":
                         model_2d = PLSDA(**best_params)
-                    model_2d.fit(X_2d_train, y_train)  # Note: for PLSDA, y_train is encoded
+                    else:
+                        model_2d = type(model_cls())(**best_params)
+                    model_2d.fit(X_2d_train, y_train)
 
                     fig_db, ax_db = plt.subplots(figsize=(8, 6))
                     plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_db)
@@ -255,30 +261,35 @@ elif fusion_level == "Mid-level (PCA Scores)":
         ftir_pc_idx = ftir_pc.set_index('label').select_dtypes(include=[np.number])
         msp_pc_idx = msp_pc.set_index('label').select_dtypes(include=[np.number])
         
+        # Group by base label (exclude replicate)
+        ftir_grouped = group_by_base_label(ftir_pc_idx)
+        msp_grouped = group_by_base_label(msp_pc_idx)
+        
         # Common labels
-        common_labels = ftir_pc_idx.index.intersection(msp_pc_idx.index)
+        common_labels = ftir_grouped.index.intersection(msp_grouped.index)
         if len(common_labels) == 0:
-            st.error("No matching labels found.")
+            st.error("No matching base labels found.")
         else:
-            st.info(f"Found {len(common_labels)} common samples.")
+            st.info(f"Found {len(common_labels)} common base samples after grouping.")
             
-            ftir_sub = ftir_pc_idx.loc[common_labels]
-            msp_sub = msp_pc_idx.loc[common_labels]
+            ftir_sub = ftir_grouped.loc[common_labels]
+            msp_sub = msp_grouped.loc[common_labels]
             
-            # Assume columns include 'PC1', 'PC2', etc.; warn if not
-            if 'PC1' not in msp_sub.columns or 'PC2' not in ftir_sub.columns:
-                st.warning("Expected 'PC1' in MSP and 'PC2' in FTIR columns. Adjust column names if needed.")
-            else:
+            # Plot MSP PC1 vs FTIR PC1, colored by sex
+            if 'PC1' in msp_sub.columns and 'PC1' in ftir_sub.columns:
                 fig, ax = plt.subplots(figsize=(8, 6))
-                scatter = ax.scatter(msp_sub['PC1'], ftir_sub['PC2'], alpha=0.7, c=[0 if l[6]=='m' else 1 for l in common_labels])
+                y_sex = ['male' if l[5] == 'm' else 'female' for l in common_labels]
+                colors = ['blue' if s == 'male' else 'red' for s in y_sex]
+                scatter = ax.scatter(msp_sub['PC1'], ftir_sub['PC1'], c=colors, alpha=0.7)
                 ax.set_xlabel('MSP PC1')
-                ax.set_ylabel('FTIR PC2')
-                ax.set_title('MSP PC1 vs FTIR PC2')
-                from matplotlib.lines import Line2D
+                ax.set_ylabel('FTIR PC1')
+                ax.set_title('MSP PC1 vs FTIR PC1')
                 legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', markersize=10, label='Male'),
                                    Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='Female')]
                 ax.legend(handles=legend_elements)
                 st.pyplot(fig)
+            else:
+                st.warning("Expected 'PC1' in both FTIR and MSP columns. Adjust column names if needed.")
             
             # Show fused mid-level data (concat PCs)
             X_fused = pd.concat([ftir_sub, msp_sub], axis=1)
@@ -289,11 +300,11 @@ elif fusion_level == "Mid-level (PCA Scores)":
 
             # ML Section (same as low-level)
             st.subheader("Machine Learning Evaluation")
-            target = st.selectbox("Select Target", ["Sex"])
+            target = st.selectbox("Select Target", ["Individual", "Sex", "Age"])
             selected_models = st.multiselect("Select Models", list(models_dict.keys()))
 
             if st.button("Run ML Evaluation") and len(selected_models) > 0:
-                ml_data = run_ml(X_fused, common_labels)
+                ml_data = run_ml(X_fused, common_labels, target)
                 if ml_data[0] is None:
                     st.stop()
 
@@ -336,9 +347,10 @@ elif fusion_level == "Mid-level (PCA Scores)":
 
                     # Decision Boundary on 2D
                     best_params = gs.best_params_
-                    model_2d = type(model_cls)(**best_params) if hasattr(model_cls, '__init__') else model_cls()
-                    if isinstance(model_2d, PLSDA):
+                    if model_name == "PLS-DA":
                         model_2d = PLSDA(**best_params)
+                    else:
+                        model_2d = type(model_cls())(**best_params)
                     model_2d.fit(X_2d_train, y_train)
 
                     fig_db, ax_db = plt.subplots(figsize=(8, 6))
