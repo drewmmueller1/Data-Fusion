@@ -192,9 +192,9 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                     st.pyplot(fig_scores)
 
                     # Option for labeled plot image
-                    if st.button("Generate Labeled Plot Image"):
+                    if st.button("Generate Labeled PCA Plot Image"):
                         buf = generate_labeled_plot(scores[:, 0], scores[:, 1], y_str, f'PCA Scores - Labeled by {target}', 'PC1', 'PC2')
-                        st.download_button("Download Labeled Plot", buf.getvalue(), "labeled_pca_plot.png", "image/png")
+                        st.download_button("Download Labeled PCA Plot", buf.getvalue(), "labeled_pca_plot.png", "image/png")
 
                 # ML Section
                 st.subheader("Machine Learning Evaluation")
@@ -244,7 +244,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         else:
                             # Test Confusion Matrix
                             cm_test = confusion_matrix(y_test, y_test_pred)
-                            fig_test, ax_test = plt.subplots()
+                            fig_test, ax_test = plt.subplots(figsize=(10, 8))
                             disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
                             disp_test.plot(ax=ax_test, xticks_rotation=45, yticks_rotation=45)
                             st.pyplot(fig_test)
@@ -261,12 +261,12 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                             # Train Confusion Matrix
                             y_train_pred = best_model.predict(X_train)
                             cm_train = confusion_matrix(y_train, y_train_pred)
-                            fig_train, ax_train = plt.subplots()
+                            fig_train, ax_train = plt.subplots(figsize=(10, 8))
                             disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
                             disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
                             st.pyplot(fig_train)
 
-                        # Decision Boundary on 2D (fit new model on 2D with best params)
+                        # Decision Boundary on 2D (fit new model on 2D with best params) - no labels on main plot
                         best_params = gs.best_params_
                         if model_name == "FNN":
                             model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
@@ -282,6 +282,21 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         ax_db.set_ylabel('PC2')
                         ax_db.set_title(f'Decision Boundary for {model_name} (on PCA 2D)')
                         st.pyplot(fig_db)
+
+                        # Option for labeled decision boundary plot image
+                        if st.button(f"Generate Labeled Decision Boundary Plot Image for {model_name}"):
+                            fig_labeled_db, ax_labeled_db = plt.subplots(figsize=(12, 8))
+                            plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_labeled_db)
+                            for i, (x1, x2) in enumerate(X_2d_train):
+                                ax_labeled_db.annotate(y_str[i], (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
+                            ax_labeled_db.set_xlabel('PC1')
+                            ax_labeled_db.set_ylabel('PC2')
+                            ax_labeled_db.set_title(f'Labeled Decision Boundary for {model_name} (on PCA 2D)')
+                            buf_db = BytesIO()
+                            fig_labeled_db.savefig(buf_db, format='png', bbox_inches='tight')
+                            buf_db.seek(0)
+                            plt.close(fig_labeled_db)
+                            st.download_button(f"Download Labeled Decision Boundary Plot for {model_name}", buf_db.getvalue(), f"labeled_decision_boundary_{model_name}.png", "image/png")
 
 elif fusion_level == "Mid-level (PCA Scores)":
     st.header("Mid-level Fusion: Upload PCA Scores")
@@ -413,7 +428,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                     else:
                         # Test Confusion Matrix
                         cm_test = confusion_matrix(y_test, y_test_pred)
-                        fig_test, ax_test = plt.subplots()
+                        fig_test, ax_test = plt.subplots(figsize=(10, 8))
                         disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
                         disp_test.plot(ax=ax_test, xticks_rotation=45, yticks_rotation=45)
                         st.pyplot(fig_test)
@@ -430,12 +445,12 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         # Train Confusion Matrix
                         y_train_pred = best_model.predict(X_train)
                         cm_train = confusion_matrix(y_train, y_train_pred)
-                        fig_train, ax_train = plt.subplots()
+                        fig_train, ax_train = plt.subplots(figsize=(10, 8))
                         disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
                         disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
                         st.pyplot(fig_train)
 
-                    # Decision Boundary on 2D
+                    # Decision Boundary on 2D (fit new model on 2D with best params) - no labels on main plot
                     best_params = gs.best_params_
                     if model_name == "FNN":
                         model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
@@ -451,3 +466,18 @@ elif fusion_level == "Mid-level (PCA Scores)":
                     ax_db.set_ylabel('PC2')
                     ax_db.set_title(f'Decision Boundary for {model_name} (on PCA 2D)')
                     st.pyplot(fig_db)
+
+                    # Option for labeled decision boundary plot image
+                    if st.button(f"Generate Labeled Decision Boundary Plot Image for {model_name}"):
+                        fig_labeled_db, ax_labeled_db = plt.subplots(figsize=(12, 8))
+                        plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_labeled_db)
+                        for i, (x1, x2) in enumerate(X_2d_train):
+                            ax_labeled_db.annotate(common_labels[i], (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
+                        ax_labeled_db.set_xlabel('PC1')
+                        ax_labeled_db.set_ylabel('PC2')
+                        ax_labeled_db.set_title(f'Labeled Decision Boundary for {model_name} (on PCA 2D)')
+                        buf_db = BytesIO()
+                        fig_labeled_db.savefig(buf_db, format='png', bbox_inches='tight')
+                        buf_db.seek(0)
+                        plt.close(fig_labeled_db)
+                        st.download_button(f"Download Labeled Decision Boundary Plot for {model_name}", buf_db.getvalue(), f"labeled_decision_boundary_{model_name}.png", "image/png")
