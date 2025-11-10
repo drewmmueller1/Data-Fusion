@@ -96,7 +96,7 @@ def group_by_base_label(features_df):
         return label.rsplit('_', 1)[0] if '_' in label else label
     features_df = features_df.copy()
     features_df['base_label'] = features_df.index.map(get_base_label)
-    grouped = features_df.groupby('base_label').mean().drop('base_label', axis=1)
+    grouped = features_df.groupby('base_label').mean()
     grouped.index.name = 'label'
     return grouped
 
@@ -254,8 +254,8 @@ elif fusion_level == "Mid-level (PCA Scores)":
         msp_pc_df = pd.read_csv(msp_pc_file)
         
         # Set index to labels (last column), select numeric PCs (first columns)
-        ftir_pc_idx = ftir_pc_df.set_index(ftir_pc_df.columns[-1]).iloc[:, :-1]
-        msp_pc_idx = msp_pc_df.set_index(msp_pc_df.columns[-1]).iloc[:, :-1]
+        ftir_pc_idx = ftir_pc_df.set_index(ftir_pc_df.columns[-1]).iloc[:, :]
+        msp_pc_idx = msp_pc_df.set_index(msp_pc_df.columns[-1]).iloc[:, :]
         
         # Group by base label (exclude replicate) - apply even if adjusted, in case
         ftir_grouped = group_by_base_label(ftir_pc_idx)
