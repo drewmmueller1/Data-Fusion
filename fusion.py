@@ -10,7 +10,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.cross_decomposition import PLSRegression
 import matplotlib.pyplot as plt
-from io import StringIO
+from io import BytesIO, StringIO
 from mlxtend.plotting import plot_decision_regions
 from matplotlib.lines import Line2D
 
@@ -61,6 +61,21 @@ def run_ml(X_fused, y_encoded, class_names):
     X_2d_train, X_2d_test, _, _ = train_test_split(X_2d, y_encoded, test_size=0.2, stratify=y_encoded, random_state=42)
 
     return X_train, X_test, y_train, y_test, X_2d_train, class_names, X_2d
+
+# Function to generate labeled plot image
+def generate_labeled_plot(x, y, labels, title, xlabel, ylabel):
+    fig, ax = plt.subplots(figsize=(12, 8))
+    scatter = ax.scatter(x, y, alpha=0.7)
+    for i, label in enumerate(labels):
+        ax.annotate(label, (x[i], y[i]), xytext=(5, 5), textcoords='offset points', fontsize=8)
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    buf = BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight')
+    buf.seek(0)
+    plt.close(fig)
+    return buf
 
 # Model definitions
 models_dict = {
@@ -175,10 +190,10 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         ax_scores.legend(handles=legend_elements)
                     st.pyplot(fig_scores)
 
-                    # Always display labels table
-                    label_df = pd.DataFrame({target: y_str}, index=common_labels)
-                    st.subheader("Labels")
-                    st.dataframe(label_df)
+                    # Option for labeled plot image
+                    if st.button("Generate Labeled Plot Image"):
+                        buf = generate_labeled_plot(scores[:, 0], scores[:, 1], y_str, f'PCA Scores - Labeled by {target}', 'PC1', 'PC2')
+                        st.download_button("Download Labeled Plot", buf.getvalue(), "labeled_pca_plot.png", "image/png")
 
                 # ML Section
                 st.subheader("Machine Learning Evaluation")
@@ -285,8 +300,8 @@ elif fusion_level == "Mid-level (PCA Scores)":
             st.info(f"Found {len(common_labels)} aligned samples.")
             
             # Rename columns to avoid duplicates
-            ftir_sub.columns = ['FTIR_' + col if col != 'Unnamed: 0' else 'FTIR_index' for col in ftir_sub.columns]
-            msp_sub.columns = ['MSP_' + col if col != 'Unnamed: 0' else 'MSP_index' for col in msp_sub.columns]
+            ftir_sub.columns = ['FTIR_' + str(col) if str(col) != 'Unnamed: 0' else 'FTIR_index' for col in ftir_sub.columns]
+            msp_sub.columns = ['MSP_' + str(col) if str(col) != 'Unnamed: 0' else 'MSP_index' for col in msp_sub.columns]
             
             # Fuse: concatenate horizontally
             X_fused = pd.concat([ftir_sub, msp_sub], axis=1)
@@ -311,10 +326,10 @@ elif fusion_level == "Mid-level (PCA Scores)":
                     ax.legend(handles=legend_elements)
                 st.pyplot(fig)
 
-                # Always display labels table
-                st.subheader("Labels")
-                label_df = pd.DataFrame({'Label': common_labels})
-                st.dataframe(label_df)
+                # Option for labeled plot image
+                if st.button("Generate Labeled Plot Image"):
+                    buf = generate_labeled_plot(msp_pc1, ftir_pc1, common_labels, 'MSP PC1 vs FTIR PC1 - Labeled', 'MSP PC1', 'FTIR PC1')
+                    st.download_button("Download Labeled Plot", buf.getvalue(), "labeled_midlevel_plot.png", "image/png")
             else:
                 st.warning("Insufficient columns for plotting PC1.")
             
