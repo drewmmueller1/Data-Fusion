@@ -162,16 +162,24 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                     st.pyplot(fig_scree)
 
                 with tab2:
+                    color_by_target = st.checkbox("Color PCA plot by target", value=True)
                     fig_scores, ax_scores = plt.subplots()
-                    scatter = ax_scores.scatter(scores[:, 0], scores[:, 1], c=y_encoded, cmap='tab10', alpha=0.7)
+                    if color_by_target:
+                        scatter = ax_scores.scatter(scores[:, 0], scores[:, 1], c=y_encoded, cmap='tab10', alpha=0.7)
+                        legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
+                                                  markerfacecolor=plt.cm.tab10(i / len(class_names)), markersize=10)
+                                           for i, cls in enumerate(class_names)]
+                        ax_scores.legend(handles=legend_elements)
+                    else:
+                        scatter = ax_scores.scatter(scores[:, 0], scores[:, 1], alpha=0.7)
                     ax_scores.set_xlabel('PC1')
                     ax_scores.set_ylabel('PC2')
-                    ax_scores.set_title(f'PCA Scores Plot (PC1 vs PC2) - Colored by {target}')
-                    legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
-                                              markerfacecolor=plt.cm.tab10(i / len(class_names)), markersize=10)
-                                       for i, cls in enumerate(class_names)]
-                    ax_scores.legend(handles=legend_elements)
+                    ax_scores.set_title(f'PCA Scores Plot (PC1 vs PC2) {"- Colored by " + target if color_by_target else ""}')
                     st.pyplot(fig_scores)
+
+                    # Display labels below the plot
+                    label_df = pd.DataFrame({target: y_str}, index=common_labels)
+                    st.dataframe(label_df)
 
                 # ML Section
                 st.subheader("Machine Learning Evaluation")
@@ -283,20 +291,28 @@ elif fusion_level == "Mid-level (PCA Scores)":
             
             # Plot MSP PC1 vs FTIR PC1, colored by label
             if ftir_sub.shape[1] > 0 and len(common_labels) > 0:
+                color_by_label = st.checkbox("Color plot by label", value=True)
                 fig, ax = plt.subplots(figsize=(8, 6))
                 ftir_pc1 = ftir_sub.iloc[:, 0]
                 msp_pc1 = msp_sub.iloc[:, 0]
-                le_temp = LabelEncoder()
-                colors = le_temp.fit_transform(common_labels)
-                scatter = ax.scatter(msp_pc1, ftir_pc1, c=colors, cmap='tab10', alpha=0.7)
+                if color_by_label:
+                    le_temp = LabelEncoder()
+                    colors = le_temp.fit_transform(common_labels)
+                    scatter = ax.scatter(msp_pc1, ftir_pc1, c=colors, cmap='tab10', alpha=0.7)
+                    legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
+                                              markerfacecolor=plt.cm.tab10(i / len(le_temp.classes_)), markersize=10)
+                                       for i, cls in enumerate(le_temp.classes_)]
+                    ax.legend(handles=legend_elements)
+                else:
+                    scatter = ax.scatter(msp_pc1, ftir_pc1, alpha=0.7)
                 ax.set_xlabel('MSP PC1')
                 ax.set_ylabel('FTIR PC1')
-                ax.set_title('MSP PC1 vs FTIR PC1 - Colored by Label')
-                legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
-                                          markerfacecolor=plt.cm.tab10(i / len(le_temp.classes_)), markersize=10)
-                                   for i, cls in enumerate(le_temp.classes_)]
-                ax.legend(handles=legend_elements)
+                ax.set_title('MSP PC1 vs FTIR PC1 {" - Colored by Label" if color_by_label else ""}')
                 st.pyplot(fig)
+
+                # Display labels below the plot
+                label_df = pd.DataFrame({'Label': common_labels})
+                st.dataframe(label_df)
             else:
                 st.warning("Insufficient columns for plotting PC1.")
             
