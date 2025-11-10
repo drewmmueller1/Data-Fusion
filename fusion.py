@@ -146,171 +146,161 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                 return 'unknown'
 
             y_str = [parse_target(l, target) for l in common_labels]
-            unknowns = sum(1 for y in y_str if y == 'unknown')
-            if unknowns > 0:
-                st.warning(f"{unknowns} labels have invalid format for '{target}' target (assigned 'unknown' class).")
-                filter_unknowns = st.checkbox("Filter out 'unknown' samples for PCA/ML", value=False)
-                if filter_unknowns:
-                    valid_mask = [y != 'unknown' for y in y_str]
-                    X_fused = X_fused.iloc[valid_mask]
-                    y_str = [y for y, m in zip(y_str, valid_mask) if m]
-                    common_labels = [l for l, m in zip(common_labels, valid_mask) if m]
-                    st.info(f"Filtered to {len(y_str)} valid samples.")
+            if 'unknown' in set(y_str):
+                st.error("Some labels have invalid format for selected target.")
             else:
-                filter_unknowns = False  # No unknowns, no need to filter
+                le = LabelEncoder()
+                y_encoded = le.fit_transform(y_str)
+                class_names = le.classes_
 
-            le = LabelEncoder()
-            y_encoded = le.fit_transform(y_str)
-            class_names = le.classes_
+                # Scale
+                scaler = StandardScaler()
+                X_scaled = scaler.fit_transform(X_fused)
 
-            # Scale
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X_fused)
+                # PCA for visualization (2 components)
+                pca_2d = PCA(n_components=2)
+                scores = pca_2d.fit_transform(X_scaled)
 
-            # PCA for visualization (2 components)
-            pca_2d = PCA(n_components=2)
-            scores = pca_2d.fit_transform(X_scaled)
+                # Full PCA for scree
+                pca_full = PCA()
+                pca_full.fit(X_scaled)
+                evr = pca_full.explained_variance_ratio_
 
-            # Full PCA for scree
-            pca_full = PCA()
-            pca_full.fit(X_scaled)
-            evr = pca_full.explained_variance_ratio_
+                # Create tabs for plots
+                tab1, tab2 = st.tabs(["Scree Plot", "PC Scores Plot"])
 
-            # Create tabs for plots
-            tab1, tab2 = st.tabs(["Scree Plot", "PC Scores Plot"])
+                with tab1:
+                    fig_scree, ax_scree = plt.subplots()
+                    ax_scree.plot(range(1, len(evr) + 1), np.cumsum(evr), 'bo-')
+                    ax_scree.set_xlabel('Number of Components')
+                    ax_scree.set_ylabel('Cumulative Explained Variance Ratio')
+                    ax_scree.set_title('Scree Plot (Cumulative)')
+                    st.pyplot(fig_scree)
 
-            with tab1:
-                fig_scree, ax_scree = plt.subplots()
-                ax_scree.plot(range(1, len(evr) + 1), np.cumsum(evr), 'bo-')
-                ax_scree.set_xlabel('Number of Components')
-                ax_scree.set_ylabel('Cumulative Explained Variance Ratio')
-                ax_scree.set_title('Scree Plot (Cumulative)')
-                st.pyplot(fig_scree)
+                with tab2:
+                    show_legend = st.checkbox("Show legend on plot", value=True if len(class_names) <= 20 else False)
+                    fig_scores, ax_scores = plt.subplots()
+                    scatter = ax_scores.scatter(scores[:, 0], scores[:, 1], c=y_encoded, cmap='tab10', alpha=0.7)
+                    ax_scores.set_xlabel('PC1')
+                    ax_scores.set_ylabel('PC2')
+                    ax_scores.set_title(f'PCA Scores Plot (PC1 vs PC2) - Colored by {target}')
+                    if show_legend:
+                        legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
+                                                  markerfacecolor=plt.cm.tab10(i / len(class_names)), markersize=10)
+                                           for i, cls in enumerate(class_names)]
+                        ax_scores.legend(handles=legend_elements)
+                    st.pyplot(fig_scores)
 
-            with tab2:
-                show_legend = st.checkbox("Show legend on plot", value=True if len(class_names) <= 20 else False)
-                fig_scores, ax_scores = plt.subplots()
-                scatter = ax_scores.scatter(scores[:, 0], scores[:, 1], c=y_encoded, cmap='tab10', alpha=0.7)
-                ax_scores.set_xlabel('PC1')
-                ax_scores.set_ylabel('PC2')
-                ax_scores.set_title(f'PCA Scores Plot (PC1 vs PC2) - Colored by {target}')
-                if show_legend:
-                    legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
-                                              markerfacecolor=plt.cm.tab10(i / len(class_names)), markersize=10)
-                                       for i, cls in enumerate(class_names)]
-                    ax_scores.legend(handles=legend_elements)
-                st.pyplot(fig_scores)
+                    # Option for labeled plot image
+                    if st.button("Generate Labeled PCA Plot Image"):
+                        buf = generate_labeled_plot(scores[:, 0], scores[:, 1], y_str, f'PCA Scores - Labeled by {target}', 'PC1', 'PC2')
+                        st.download_button("Download Labeled PCA Plot", buf.getvalue(), "labeled_pca_plot.png", "image/png")
 
-                # Option for labeled plot image
-                if st.button("Generate Labeled PCA Plot Image"):
-                    buf = generate_labeled_plot(scores[:, 0], scores[:, 1], y_str, f'PCA Scores - Labeled by {target}', 'PC1', 'PC2')
-                    st.download_button("Download Labeled PCA Plot", buf.getvalue(), "labeled_pca_plot.png", "image/png")
+                # ML Section
+                st.subheader("Machine Learning Evaluation")
+                selected_models = st.multiselect("Select Models", list(models_dict.keys()))
 
-            # ML Section
-            st.subheader("Machine Learning Evaluation")
-            selected_models = st.multiselect("Select Models", list(models_dict.keys()))
+                if st.button("Run ML Evaluation") and len(selected_models) > 0:
+                    ml_data = run_ml(X_fused, y_encoded, class_names)
+                    if ml_data[0] is None:
+                        st.stop()
 
-            if st.button("Run ML Evaluation") and len(selected_models) > 0:
-                ml_data = run_ml(X_fused, y_encoded, class_names)
-                if ml_data[0] is None:
-                    st.stop()
+                    X_train, X_test, y_train, y_test, X_2d_train, class_names, X_2d = ml_data
 
-                X_train, X_test, y_train, y_test, X_2d_train, class_names, X_2d = ml_data
+                    for model_name in selected_models:
+                        st.header(f"Results for {model_name}")
+                        model_cls, param_grid = models_dict[model_name]
 
-                for model_name in selected_models:
-                    st.header(f"Results for {model_name}")
-                    model_cls, param_grid = models_dict[model_name]
+                        if not param_grid:
+                            param_grid = {}
 
-                    if not param_grid:
-                        param_grid = {}
+                        if model_name == "FNN":
+                            estimator = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1)
+                        else:
+                            estimator = model_cls()
+                        gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+                        gs.fit(X_train, y_train)
 
-                    if model_name == "FNN":
-                        estimator = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1)
-                    else:
-                        estimator = model_cls()
-                    gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
-                    gs.fit(X_train, y_train)
+                        st.write(f"Best Parameters: {gs.best_params_}")
+                        st.write(f"Cross-Validation Accuracy: {gs.best_score_:.3f}")
 
-                    st.write(f"Best Parameters: {gs.best_params_}")
-                    st.write(f"Cross-Validation Accuracy: {gs.best_score_:.3f}")
+                        best_model = gs.best_estimator_
 
-                    best_model = gs.best_estimator_
+                        # Test predictions
+                        y_test_pred = best_model.predict(X_test)
+                        test_acc = accuracy_score(y_test, y_test_pred)
+                        st.write(f"Test Accuracy: {test_acc:.3f}")
 
-                    # Test predictions
-                    y_test_pred = best_model.predict(X_test)
-                    test_acc = accuracy_score(y_test, y_test_pred)
-                    st.write(f"Test Accuracy: {test_acc:.3f}")
+                        # Train predictions
+                        y_train_pred = best_model.predict(X_train)
+                        train_acc = accuracy_score(y_train, y_train_pred)
+                        st.write(f"Train Accuracy: {train_acc:.3f}")
 
-                    # Train predictions
-                    y_train_pred = best_model.predict(X_train)
-                    train_acc = accuracy_score(y_train, y_train_pred)
-                    st.write(f"Train Accuracy: {train_acc:.3f}")
+                        # Improved Confusion Matrix with heatmap if too many classes
+                        if len(class_names) > 10:
+                            st.warning(f"Too many classes ({len(class_names)}), showing heatmap summary instead of full matrix.")
+                            cm_test = confusion_matrix(y_test, y_test_pred)
+                            fig_cm, ax_cm = plt.subplots(figsize=(10, 8))
+                            sns.heatmap(cm_test, annot=False, fmt='d', cmap='Blues', ax=ax_cm)
+                            ax_cm.set_xlabel('Predicted')
+                            ax_cm.set_ylabel('True')
+                            ax_cm.set_title('Test Confusion Matrix Heatmap')
+                            st.pyplot(fig_cm)
+                        else:
+                            # Test Confusion Matrix
+                            cm_test = confusion_matrix(y_test, y_test_pred)
+                            fig_test, ax_test = plt.subplots(figsize=(10, 8))
+                            disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
+                            disp_test.plot(ax=ax_test, xticks_rotation=45, yticks_rotation=45)
+                            st.pyplot(fig_test)
 
-                    # Improved Confusion Matrix with heatmap if too many classes
-                    if len(class_names) > 10:
-                        st.warning(f"Too many classes ({len(class_names)}), showing heatmap summary instead of full matrix.")
-                        cm_test = confusion_matrix(y_test, y_test_pred)
-                        fig_cm, ax_cm = plt.subplots(figsize=(10, 8))
-                        sns.heatmap(cm_test, annot=False, fmt='d', cmap='Blues', ax=ax_cm)
-                        ax_cm.set_xlabel('Predicted')
-                        ax_cm.set_ylabel('True')
-                        ax_cm.set_title('Test Confusion Matrix Heatmap')
-                        st.pyplot(fig_cm)
-                    else:
-                        # Test Confusion Matrix
-                        cm_test = confusion_matrix(y_test, y_test_pred)
-                        fig_test, ax_test = plt.subplots(figsize=(10, 8))
-                        disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
-                        disp_test.plot(ax=ax_test, xticks_rotation=45, yticks_rotation=45)
-                        st.pyplot(fig_test)
+                        if len(class_names) > 10:
+                            cm_train = confusion_matrix(y_train, y_train_pred)
+                            fig_train_cm, ax_train_cm = plt.subplots(figsize=(10, 8))
+                            sns.heatmap(cm_train, annot=False, fmt='d', cmap='Blues', ax=ax_train_cm)
+                            ax_train_cm.set_xlabel('Predicted')
+                            ax_train_cm.set_ylabel('True')
+                            ax_train_cm.set_title('Train Confusion Matrix Heatmap')
+                            st.pyplot(fig_train_cm)
+                        else:
+                            # Train Confusion Matrix
+                            cm_train = confusion_matrix(y_train, y_train_pred)
+                            fig_train, ax_train = plt.subplots(figsize=(10, 8))
+                            disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
+                            disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
+                            st.pyplot(fig_train)
 
-                    if len(class_names) > 10:
-                        cm_train = confusion_matrix(y_train, y_train_pred)
-                        fig_train_cm, ax_train_cm = plt.subplots(figsize=(10, 8))
-                        sns.heatmap(cm_train, annot=False, fmt='d', cmap='Blues', ax=ax_train_cm)
-                        ax_train_cm.set_xlabel('Predicted')
-                        ax_train_cm.set_ylabel('True')
-                        ax_train_cm.set_title('Train Confusion Matrix Heatmap')
-                        st.pyplot(fig_train_cm)
-                    else:
-                        # Train Confusion Matrix
-                        cm_train = confusion_matrix(y_train, y_train_pred)
-                        fig_train, ax_train = plt.subplots(figsize=(10, 8))
-                        disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
-                        disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
-                        st.pyplot(fig_train)
+                        # Decision Boundary on 2D (fit new model on 2D with best params) - no labels on main plot
+                        best_params = gs.best_params_
+                        if model_name == "FNN":
+                            model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
+                        elif model_name == "PLS-DA":
+                            model_2d = PLSDA(**best_params)
+                        else:
+                            model_2d = model_cls(**best_params)
+                        model_2d.fit(X_2d_train, y_train)
 
-                    # Decision Boundary on 2D (fit new model on 2D with best params) - no labels on main plot
-                    best_params = gs.best_params_
-                    if model_name == "FNN":
-                        model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
-                    elif model_name == "PLS-DA":
-                        model_2d = PLSDA(**best_params)
-                    else:
-                        model_2d = model_cls(**best_params)
-                    model_2d.fit(X_2d_train, y_train)
+                        fig_db, ax_db = plt.subplots(figsize=(8, 6))
+                        plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_db)
+                        ax_db.set_xlabel('PC1')
+                        ax_db.set_ylabel('PC2')
+                        ax_db.set_title(f'Decision Boundary for {model_name} (on PCA 2D)')
+                        st.pyplot(fig_db)
 
-                    fig_db, ax_db = plt.subplots(figsize=(8, 6))
-                    plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_db)
-                    ax_db.set_xlabel('PC1')
-                    ax_db.set_ylabel('PC2')
-                    ax_db.set_title(f'Decision Boundary for {model_name} (on PCA 2D)')
-                    st.pyplot(fig_db)
-
-                    # Option for labeled decision boundary plot image
-                    if st.button(f"Generate Labeled Decision Boundary Plot Image for {model_name}"):
-                        fig_labeled_db, ax_labeled_db = plt.subplots(figsize=(12, 8))
-                        plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_labeled_db)
-                        for i, (x1, x2) in enumerate(X_2d_train):
-                            ax_labeled_db.annotate(y_str[i], (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
-                        ax_labeled_db.set_xlabel('PC1')
-                        ax_labeled_db.set_ylabel('PC2')
-                        ax_labeled_db.set_title(f'Labeled Decision Boundary for {model_name} (on PCA 2D)')
-                        buf_db = BytesIO()
-                        fig_labeled_db.savefig(buf_db, format='png', bbox_inches='tight')
-                        buf_db.seek(0)
-                        plt.close(fig_labeled_db)
-                        st.download_button(f"Download Labeled Decision Boundary Plot for {model_name}", buf_db.getvalue(), f"labeled_decision_boundary_{model_name}.png", "image/png")
+                        # Option for labeled decision boundary plot image
+                        if st.button(f"Generate Labeled Decision Boundary Plot Image for {model_name}"):
+                            fig_labeled_db, ax_labeled_db = plt.subplots(figsize=(12, 8))
+                            plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_labeled_db)
+                            for i, (x1, x2) in enumerate(X_2d_train):
+                                ax_labeled_db.annotate(y_str[i], (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
+                            ax_labeled_db.set_xlabel('PC1')
+                            ax_labeled_db.set_ylabel('PC2')
+                            ax_labeled_db.set_title(f'Labeled Decision Boundary for {model_name} (on PCA 2D)')
+                            buf_db = BytesIO()
+                            fig_labeled_db.savefig(buf_db, format='png', bbox_inches='tight')
+                            buf_db.seek(0)
+                            plt.close(fig_labeled_db)
+                            st.download_button(f"Download Labeled Decision Boundary Plot for {model_name}", buf_db.getvalue(), f"labeled_decision_boundary_{model_name}.png", "image/png")
 
 elif fusion_level == "Mid-level (PCA Scores)":
     st.header("Mid-level Fusion: Upload PCA Scores")
@@ -447,4 +437,63 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         st.warning(f"Too many classes ({len(class_names)}), showing heatmap summary instead of full matrix.")
                         cm_test = confusion_matrix(y_test, y_test_pred)
                         fig_cm, ax_cm = plt.subplots(figsize=(10, 8))
-                        sns.heatmap(cm_test, annot=False,
+                        sns.heatmap(cm_test, annot=False, fmt='d', cmap='Blues', ax=ax_cm)
+                        ax_cm.set_xlabel('Predicted')
+                        ax_cm.set_ylabel('True')
+                        ax_cm.set_title('Test Confusion Matrix Heatmap')
+                        st.pyplot(fig_cm)
+                    else:
+                        # Test Confusion Matrix
+                        cm_test = confusion_matrix(y_test, y_test_pred)
+                        fig_test, ax_test = plt.subplots(figsize=(10, 8))
+                        disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
+                        disp_test.plot(ax=ax_test, xticks_rotation=45, yticks_rotation=45)
+                        st.pyplot(fig_test)
+
+                    if len(class_names) > 10:
+                        cm_train = confusion_matrix(y_train, y_train_pred)
+                        fig_train_cm, ax_train_cm = plt.subplots(figsize=(10, 8))
+                        sns.heatmap(cm_train, annot=False, fmt='d', cmap='Blues', ax=ax_train_cm)
+                        ax_train_cm.set_xlabel('Predicted')
+                        ax_train_cm.set_ylabel('True')
+                        ax_train_cm.set_title('Train Confusion Matrix Heatmap')
+                        st.pyplot(fig_train_cm)
+                    else:
+                        # Train Confusion Matrix
+                        cm_train = confusion_matrix(y_train, y_train_pred)
+                        fig_train, ax_train = plt.subplots(figsize=(10, 8))
+                        disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
+                        disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
+                        st.pyplot(fig_train)
+
+                    # Decision Boundary on MSP PC1 vs FTIR PC1 (no labels on main plot)
+                    best_params = gs.best_params_
+                    if model_name == "FNN":
+                        model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
+                    elif model_name == "PLS-DA":
+                        model_2d = PLSDA(**best_params)
+                    else:
+                        model_2d = model_cls(**best_params)
+                    model_2d.fit(X_2d_train, y_train)
+
+                    fig_db, ax_db = plt.subplots(figsize=(8, 6))
+                    plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_db)
+                    ax_db.set_xlabel('MSP PC1')
+                    ax_db.set_ylabel('FTIR PC1')
+                    ax_db.set_title(f'Decision Boundary for {model_name} (MSP PC1 vs FTIR PC1)')
+                    st.pyplot(fig_db)
+
+                    # Option for labeled decision boundary plot image
+                    if st.button(f"Generate Labeled Decision Boundary Plot Image for {model_name}"):
+                        fig_labeled_db, ax_labeled_db = plt.subplots(figsize=(12, 8))
+                        plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_labeled_db)
+                        for i, (x1, x2) in enumerate(X_2d_train):
+                            ax_labeled_db.annotate(common_labels[i], (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
+                        ax_labeled_db.set_xlabel('MSP PC1')
+                        ax_labeled_db.set_ylabel('FTIR PC1')
+                        ax_labeled_db.set_title(f'Labeled Decision Boundary for {model_name} (MSP PC1 vs FTIR PC1)')
+                        buf_db = BytesIO()
+                        fig_labeled_db.savefig(buf_db, format='png', bbox_inches='tight')
+                        buf_db.seek(0)
+                        plt.close(fig_labeled_db)
+                        st.download_button(f"Download Labeled Decision Boundary Plot for {model_name}", buf_db.getvalue(), f"labeled_decision_boundary_{model_name}.png", "image/png")
