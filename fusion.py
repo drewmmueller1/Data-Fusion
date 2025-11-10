@@ -59,7 +59,7 @@ def run_ml(X_fused, common_labels, target_type):
 
     y_str = [parse_target(l, target_type) for l in common_labels]
     y_series = pd.Series(y_str, index=common_labels)
-    if 'unknown' in y_series.values:
+    if 'unknown' in set(y_series.values):
         st.error("Some labels have invalid format.")
         return None, None, None, None, None, None, None
 
@@ -94,30 +94,27 @@ models_dict = {
 def group_by_base_label(features_df):
     def get_base_label(label):
         return label.rsplit('_', 1)[0] if '_' in label else label
+    features_df = features_df.copy()
     features_df['base_label'] = features_df.index.map(get_base_label)
-    grouped = features_df.groupby('base_label').mean()
+    grouped = features_df.groupby('base_label').mean().drop('base_label', axis=1)
     grouped.index.name = 'label'
     return grouped
 
 if fusion_level == "Low-level (Preprocessed Spectra)":
     st.header("Low-level Fusion: Upload Preprocessed Spectra")
-    ftir_file = st.file_uploader("Upload FTIR Spectra CSV (rows: samples/labels, columns: features)", type="csv")
-    msp_file = st.file_uploader("Upload MSP Spectra CSV (rows: samples/labels, columns: features)", type="csv")
+    ftir_file = st.file_uploader("Upload FTIR Spectra CSV (first column: wavenumbers, columns: samples, first row per column: labels)", type="csv")
+    msp_file = st.file_uploader("Upload MSP Spectra CSV (first column: wavelengths, columns: samples, first row per column: labels)", type="csv")
     
     if ftir_file is not None and msp_file is not None:
-        # Read CSVs, assuming first column is 'label', rest are features
-        ftir_df = pd.read_csv(ftir_file)
-        msp_df = pd.read_csv(msp_file)
+        # Read CSVs: index_col=0 for wavenumbers/wavelengths, columns are sample labels
+        ftir_df = pd.read_csv(ftir_file, index_col=0)
+        msp_df = pd.read_csv(msp_file, index_col=0)
         
-        # Ensure 'label' column exists; if not, use index as label
-        if 'label' not in ftir_df.columns:
-            ftir_df.insert(0, 'label', ftir_df.index.astype(str))
-        if 'label' not in msp_df.columns:
-            msp_df.insert(0, 'label', msp_df.index.astype(str))
+        # Transpose to have samples as rows, features as columns
+        ftir_features = ftir_df.T
+        msp_features = msp_df.T
         
-        # Set label as index for grouping
-        ftir_features = ftir_df.set_index('label').select_dtypes(include=[np.number])
-        msp_features = msp_df.set_index('label').select_dtypes(include=[np.number])
+        # Now index is labels (samples)
         
         # Group by base label (exclude replicate)
         ftir_grouped = group_by_base_label(ftir_features)
@@ -193,12 +190,12 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                     st.header(f"Results for {model_name}")
                     model_cls, param_grid = models_dict[model_name]
 
-                    # If no params, use empty dict
                     if not param_grid:
                         param_grid = {}
 
                     if model_name == "FNN":
                         estimator = MLPClassifier(max_iter=500, random_state=42)
+                        param_grid = {k: v for k, v in param_grid.items() if k != 'max_iter' and k != 'random_state'}
                     else:
                         estimator = model_cls
                     gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
@@ -248,25 +245,19 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
 
 elif fusion_level == "Mid-level (PCA Scores)":
     st.header("Mid-level Fusion: Upload PCA Scores")
-    ftir_pc_file = st.file_uploader("Upload FTIR PCA Scores CSV (rows: samples/labels, columns: PCs)", type="csv")
-    msp_pc_file = st.file_uploader("Upload MSP PCA Scores CSV (rows: samples/labels, columns: PCs)", type="csv")
+    ftir_pc_file = st.file_uploader("Upload FTIR PCA Scores CSV (columns: PCs then labels)", type="csv")
+    msp_pc_file = st.file_uploader("Upload MSP PCA Scores CSV (columns: PCs then labels)", type="csv")
     
     if ftir_pc_file is not None and msp_pc_file is not None:
         # Read CSVs
-        ftir_pc = pd.read_csv(ftir_pc_file)
-        msp_pc = pd.read_csv(msp_pc_file)
+        ftir_pc_df = pd.read_csv(ftir_pc_file)
+        msp_pc_df = pd.read_csv(msp_pc_file)
         
-        # Ensure 'label' column
-        if 'label' not in ftir_pc.columns:
-            ftir_pc.insert(0, 'label', ftir_pc.index.astype(str))
-        if 'label' not in msp_pc.columns:
-            msp_pc.insert(0, 'label', msp_pc.index.astype(str))
+        # Set index to labels (last column), select numeric PCs (first columns)
+        ftir_pc_idx = ftir_pc_df.set_index(ftir_pc_df.columns[-1]).iloc[:, :-1]
+        msp_pc_idx = msp_pc_df.set_index(msp_pc_df.columns[-1]).iloc[:, :-1]
         
-        # Set index to label, select numeric PC columns
-        ftir_pc_idx = ftir_pc.set_index('label').select_dtypes(include=[np.number])
-        msp_pc_idx = msp_pc.set_index('label').select_dtypes(include=[np.number])
-        
-        # Group by base label (exclude replicate)
+        # Group by base label (exclude replicate) - apply even if adjusted, in case
         ftir_grouped = group_by_base_label(ftir_pc_idx)
         msp_grouped = group_by_base_label(msp_pc_idx)
         
@@ -280,12 +271,12 @@ elif fusion_level == "Mid-level (PCA Scores)":
             ftir_sub = ftir_grouped.loc[common_labels]
             msp_sub = msp_grouped.loc[common_labels]
             
-            # Plot MSP PC1 vs FTIR PC1, colored by sex
-            if 'PC1' in msp_sub.columns and 'PC1' in ftir_sub.columns:
+            # Plot MSP PC1 (column 2, 0-based index 1) vs FTIR PC1 (column 2, index 1), colored by sex
+            if ftir_sub.shape[1] > 1 and msp_sub.shape[1] > 1:
                 fig, ax = plt.subplots(figsize=(8, 6))
                 y_sex = ['male' if l[5] == 'm' else 'female' for l in common_labels]
                 colors = ['blue' if s == 'male' else 'red' for s in y_sex]
-                scatter = ax.scatter(msp_sub['PC1'], ftir_sub['PC1'], c=colors, alpha=0.7)
+                scatter = ax.scatter(msp_sub.iloc[:, 1], ftir_sub.iloc[:, 1], c=colors, alpha=0.7)
                 ax.set_xlabel('MSP PC1')
                 ax.set_ylabel('FTIR PC1')
                 ax.set_title('MSP PC1 vs FTIR PC1')
@@ -294,7 +285,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                 ax.legend(handles=legend_elements)
                 st.pyplot(fig)
             else:
-                st.warning("Expected 'PC1' in both FTIR and MSP columns. Adjust column names if needed.")
+                st.warning("Insufficient PC columns for plotting PC1 (column 2).")
             
             # Show fused mid-level data (concat PCs)
             X_fused = pd.concat([ftir_sub, msp_sub], axis=1)
@@ -324,6 +315,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
 
                     if model_name == "FNN":
                         estimator = MLPClassifier(max_iter=500, random_state=42)
+                        param_grid = {k: v for k, v in param_grid.items() if k != 'max_iter' and k != 'random_state'}
                     else:
                         estimator = model_cls
                     gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
