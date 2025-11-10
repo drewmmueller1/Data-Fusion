@@ -46,14 +46,21 @@ def run_ml(X_fused, common_labels, target_type):
         return None, None, None, None, None, None, None
 
     def parse_target(label, t_type):
-        date = label[:5]
-        sex = label[5]
-        age = int(label[6:])
+        base = label.rsplit('_', 1)[0] if '_' in label else label
+        date = base[:5]
+        sex = base[5]
+        age_str = base[6:]
+        try:
+            age = int(age_str)
+        except ValueError:
+            age = None
         if t_type == "Individual":
             return date
         elif t_type == "Sex":
             return 'male' if sex == 'm' else 'female'
         elif t_type == "Age":
+            if age is None:
+                return 'unknown'
             return age
         return 'unknown'
 
@@ -91,15 +98,6 @@ models_dict = {
     "FNN": (MLPClassifier, {'hidden_layer_sizes': [(50,), (100,)], 'alpha': [0.0001, 0.001]})
 }
 
-def group_by_base_label(features_df):
-    def get_base_label(label):
-        return label.rsplit('_', 1)[0] if '_' in label else label
-    features_df = features_df.copy()
-    features_df['base_label'] = features_df.index.map(get_base_label)
-    grouped = features_df.groupby('base_label').mean()
-    grouped.index.name = 'label'
-    return grouped
-
 if fusion_level == "Low-level (Preprocessed Spectra)":
     st.header("Low-level Fusion: Upload Preprocessed Spectra")
     ftir_file = st.file_uploader("Upload FTIR Spectra CSV (first column: wavenumbers, columns: samples, first row per column: labels)", type="csv")
@@ -114,21 +112,19 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
         ftir_features = ftir_df.T
         msp_features = msp_df.T
         
-        # Now index is labels (samples)
+        # Select numeric only
+        ftir_features = ftir_features.select_dtypes(include=[np.number])
+        msp_features = msp_features.select_dtypes(include=[np.number])
         
-        # Group by base label (exclude replicate)
-        ftir_grouped = group_by_base_label(ftir_features)
-        msp_grouped = group_by_base_label(msp_features)
-        
-        # Find common base labels
-        common_labels = ftir_grouped.index.intersection(msp_grouped.index)
+        # Now index is labels (samples), find exact matching labels
+        common_labels = ftir_features.index.intersection(msp_features.index)
         if len(common_labels) == 0:
-            st.error("No matching base labels found between FTIR and MSP files.")
+            st.error("No matching labels found between FTIR and MSP files.")
         else:
-            st.info(f"Found {len(common_labels)} common base samples after grouping.")
+            st.info(f"Found {len(common_labels)} common samples.")
             
-            ftir_sub = ftir_grouped.loc[common_labels]
-            msp_sub = msp_grouped.loc[common_labels]
+            ftir_sub = ftir_features.loc[common_labels]
+            msp_sub = msp_features.loc[common_labels]
             
             # Fuse: concatenate horizontally
             X_fused = pd.concat([ftir_sub, msp_sub], axis=1)
@@ -194,10 +190,10 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         param_grid = {}
 
                     if model_name == "FNN":
-                        estimator = MLPClassifier(max_iter=500, random_state=42)
-                        param_grid = {k: v for k, v in param_grid.items() if k != 'max_iter' and k != 'random_state'}
+                        estimator = MLPClassifier(max_iter=500, random_state=42, **{k: v for k, v in param_grid.items() if k not in ['max_iter', 'random_state']})
+                        # param_grid remains for search
                     else:
-                        estimator = model_cls
+                        estimator = model_cls(**{k: v for k, v in param_grid.items() if callable(v) or not isinstance(v, (list, tuple))}) if param_grid else model_cls()
                     gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
                     gs.fit(X_train, y_train)
 
@@ -253,23 +249,21 @@ elif fusion_level == "Mid-level (PCA Scores)":
         ftir_pc_df = pd.read_csv(ftir_pc_file)
         msp_pc_df = pd.read_csv(msp_pc_file)
         
-        # Set index to labels (last column), select numeric PCs (first columns)
-        ftir_pc_idx = ftir_pc_df.set_index(ftir_pc_df.columns[-1]).iloc[:, :]
-        msp_pc_idx = msp_pc_df.set_index(msp_pc_df.columns[-1]).iloc[:, :]
+        # Set index to labels (last column), select numeric PCs (previous columns)
+        label_col = ftir_pc_df.columns[-1]
+        ftir_pc_idx = ftir_pc_df.set_index(label_col).select_dtypes(include=[np.number])
+        label_col_msp = msp_pc_df.columns[-1]
+        msp_pc_idx = msp_pc_df.set_index(label_col_msp).select_dtypes(include=[np.number])
         
-        # Group by base label (exclude replicate) - apply even if adjusted, in case
-        ftir_grouped = group_by_base_label(ftir_pc_idx)
-        msp_grouped = group_by_base_label(msp_pc_idx)
-        
-        # Common labels
-        common_labels = ftir_grouped.index.intersection(msp_grouped.index)
+        # Find exact matching labels for 1:1
+        common_labels = ftir_pc_idx.index.intersection(msp_pc_idx.index)
         if len(common_labels) == 0:
-            st.error("No matching base labels found.")
+            st.error("No matching labels found.")
         else:
-            st.info(f"Found {len(common_labels)} common base samples after grouping.")
+            st.info(f"Found {len(common_labels)} common samples.")
             
-            ftir_sub = ftir_grouped.loc[common_labels]
-            msp_sub = msp_grouped.loc[common_labels]
+            ftir_sub = ftir_pc_idx.loc[common_labels]
+            msp_sub = msp_pc_idx.loc[common_labels]
             
             # Plot MSP PC1 (column 2, 0-based index 1) vs FTIR PC1 (column 2, index 1), colored by sex
             if ftir_sub.shape[1] > 1 and msp_sub.shape[1] > 1:
@@ -314,10 +308,9 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         param_grid = {}
 
                     if model_name == "FNN":
-                        estimator = MLPClassifier(max_iter=500, random_state=42)
-                        param_grid = {k: v for k, v in param_grid.items() if k != 'max_iter' and k != 'random_state'}
+                        estimator = MLPClassifier(max_iter=500, random_state=42, **{k: v for k, v in param_grid.items() if k not in ['max_iter', 'random_state']})
                     else:
-                        estimator = model_cls
+                        estimator = model_cls(**{k: v for k, v in param_grid.items() if callable(v) or not isinstance(v, (list, tuple))}) if param_grid else model_cls()
                     gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
                     gs.fit(X_train, y_train)
 
