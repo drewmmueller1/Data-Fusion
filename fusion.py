@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split, GridSearchCV
@@ -68,7 +69,7 @@ def generate_labeled_plot(x, y, labels, title, xlabel, ylabel):
     fig, ax = plt.subplots(figsize=(12, 8))
     scatter = ax.scatter(x, y, alpha=0.7)
     for i, label in enumerate(labels):
-        ax.annotate(label, (x[i], y[i]), xytext=(5, 5), textcoords='offset points', fontsize=8)
+        ax.annotate(str(label), (x[i], y[i]), xytext=(5, 5), textcoords='offset points', fontsize=8)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.set_title(title)
@@ -117,39 +118,39 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
             # Fuse: concatenate horizontally
             X_fused = pd.concat([ftir_sub, msp_sub], axis=1)
             
-            # Fused data option
-            st.subheader("Fused Data")
-            st.dataframe(X_fused)
-            csv = X_fused.to_csv()
-            st.download_button("Download Fused CSV", csv, "fused_data.csv")
-
             # Target selection for visualization and ML
             target = st.selectbox("Select Target", ["Individual", "Sex", "Age"])
 
             def parse_target(label, t_type):
                 base = label.rsplit('_', 1)[0] if '_' in label else label
-                date = base[:5]
-                sex = base[5]
-                age_str = base[6:]
-                try:
-                    age = int(age_str)
-                except ValueError:
-                    age = None
-                if t_type == "Individual":
-                    return date
+                match = re.match(r'^(\d+)([mf])(\d+)$', base, re.IGNORECASE)
+                if match:
+                    code, sex, age_str = match.groups()
+                    try:
+                        age = int(age_str)
+                    except ValueError:
+                        age = None
+                    if t_type == "Individual":
+                        return code
+                    elif t_type == "Sex":
+                        return 'male' if sex.lower() == 'm' else 'female'
+                    elif t_type == "Age":
+                        if age is None:
+                            return 'unknown'
+                        return age
+                # Fallback for invalid formats
+                if t_type == "Age":
+                    return 'unknown'
                 elif t_type == "Sex":
-                    return 'male' if sex == 'm' else 'female'
-                elif t_type == "Age":
-                    if age is None:
-                        return 'unknown'
-                    return age
-                return 'unknown'
+                    return 'female'  # default
+                else:
+                    return base[:4] if len(base) >= 4 else base
 
             y_str = [parse_target(l, target) for l in common_labels]
             
             # Filter out 'unknown' targets (e.g., invalid ages) and proceed
             original_n = len(y_str)
-            if 'unknown' in y_str:
+            if 'unknown' in set(y_str):  # Use set for efficiency
                 valid_indices = [i for i, ys in enumerate(y_str) if ys != 'unknown']
                 if len(valid_indices) == 0:
                     st.error("No valid samples for selected target.")
@@ -159,10 +160,15 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                 y_str = [y_str[i] for i in valid_indices]
                 excluded_n = original_n - len(y_str)
                 st.warning(f"Excluded {excluded_n} samples with invalid format for {target}. Proceeding with {len(y_str)} valid samples.")
-                # Update download CSV to filtered data
-                csv = X_fused.to_csv()
-                st.download_button("Download Filtered Fused CSV", csv, "filtered_fused_data.csv")
             
+            st.success(f"Using {len(y_str)} valid samples for {target} classification.")
+            
+            # Fused data option (now after filtering)
+            st.subheader("Fused Data")
+            st.dataframe(X_fused)
+            csv = X_fused.to_csv()
+            st.download_button("Download Fused CSV", csv, "fused_data.csv")
+
             le = LabelEncoder()
             y_encoded = le.fit_transform(y_str)
             class_names = le.classes_
@@ -199,7 +205,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                 ax_scores.set_ylabel('PC2')
                 ax_scores.set_title(f'PCA Scores Plot (PC1 vs PC2) - Colored by {target}')
                 if show_legend:
-                    legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
+                    legend_elements = [Line2D([0], [0], marker='o', color='w', label=str(cls),
                                               markerfacecolor=plt.cm.tab10(i / len(class_names)), markersize=10)
                                        for i, cls in enumerate(class_names)]
                     ax_scores.legend(handles=legend_elements)
@@ -220,6 +226,8 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                     st.stop()
 
                 X_train, X_test, y_train, y_test, X_2d_train, class_names, X_2d = ml_data
+
+                y_str_train = le.inverse_transform(y_train)
 
                 for model_name in selected_models:
                     st.header(f"Results for {model_name}")
@@ -306,7 +314,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         fig_labeled_db, ax_labeled_db = plt.subplots(figsize=(12, 8))
                         plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_labeled_db)
                         for i, (x1, x2) in enumerate(X_2d_train):
-                            ax_labeled_db.annotate(y_str[i], (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
+                            ax_labeled_db.annotate(str(y_str_train[i]), (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
                         ax_labeled_db.set_xlabel('PC1')
                         ax_labeled_db.set_ylabel('PC2')
                         ax_labeled_db.set_title(f'Labeled Decision Boundary for {model_name} (on PCA 2D)')
@@ -374,7 +382,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                 ax.set_ylabel('FTIR PC1')
                 ax.set_title('MSP PC1 vs FTIR PC1 - Colored by Label')
                 if show_legend:
-                    legend_elements = [Line2D([0], [0], marker='o', color='w', label=cls,
+                    legend_elements = [Line2D([0], [0], marker='o', color='w', label=str(cls),
                                               markerfacecolor=plt.cm.tab10(i / len(le_temp.classes_)), markersize=10)
                                        for i, cls in enumerate(le_temp.classes_)]
                     ax.legend(handles=legend_elements)
@@ -416,6 +424,8 @@ elif fusion_level == "Mid-level (PCA Scores)":
 
                 # Split for higher dims
                 X_train, X_test, y_train, y_test = train_test_split(X_ml, y_encoded, test_size=0.2, stratify=y_encoded, random_state=42)
+
+                y_labels_train = le.inverse_transform(y_train)
 
                 for model_name in selected_models:
                     st.header(f"Results for {model_name}")
@@ -502,7 +512,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         fig_labeled_db, ax_labeled_db = plt.subplots(figsize=(12, 8))
                         plot_decision_regions(X_2d_train, y_train, model_2d, legend=1, ax=ax_labeled_db)
                         for i, (x1, x2) in enumerate(X_2d_train):
-                            ax_labeled_db.annotate(common_labels[i], (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
+                            ax_labeled_db.annotate(str(y_labels_train[i]), (x1, x2), xytext=(5, 5), textcoords='offset points', fontsize=8)
                         ax_labeled_db.set_xlabel('MSP PC1')
                         ax_labeled_db.set_ylabel('FTIR PC1')
                         ax_labeled_db.set_title(f'Labeled Decision Boundary for {model_name} (MSP PC1 vs FTIR PC1)')
