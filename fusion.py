@@ -10,13 +10,14 @@ from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.cross_decomposition import PLSRegression
+from sklearn.base import BaseEstimator, ClassifierMixin
 import matplotlib.pyplot as plt
 from io import BytesIO, StringIO
 from mlxtend.plotting import plot_decision_regions
 from matplotlib.lines import Line2D
 import seaborn as sns
 
-class PLSDA:
+class PLSDA(BaseEstimator, ClassifierMixin):
     def __init__(self, n_components=2):
         self.n_components = n_components
         self.pls = PLSRegression(n_components=n_components)
