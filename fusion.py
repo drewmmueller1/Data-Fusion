@@ -164,6 +164,9 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
             
             st.success(f"Using {len(y_str)} valid samples for {target} classification.")
             
+            # Update index of X_fused to the target values
+            X_fused.index = y_str
+            
             # Fused data option (now after filtering)
             st.subheader("Fused Data")
             st.dataframe(X_fused)
@@ -238,10 +241,10 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         param_grid = {}
 
                     if model_name == "FNN":
-                        estimator = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1)
+                        estimator = MLPClassifier(max_iter=2000, random_state=42, early_stopping=False)
                     else:
                         estimator = model_cls()
-                    gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+                    gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=1)
                     gs.fit(X_train, y_train)
 
                     st.write(f"Best Parameters: {gs.best_params_}")
@@ -296,7 +299,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                     # Decision Boundary on 2D (fit new model on 2D with best params) - no labels on main plot
                     best_params = gs.best_params_
                     if model_name == "FNN":
-                        model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
+                        model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=False, **best_params)
                     elif model_name == "PLS-DA":
                         model_2d = PLSDA(**best_params)
                     else:
@@ -436,10 +439,10 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         param_grid = {}
 
                     if model_name == "FNN":
-                        estimator = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1)
+                        estimator = MLPClassifier(max_iter=2000, random_state=42, early_stopping=False)
                     else:
                         estimator = model_cls()
-                    gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+                    gs = GridSearchCV(estimator, param_grid, cv=5, scoring='accuracy', n_jobs=1)
                     gs.fit(X_train, y_train)
 
                     st.write(f"Best Parameters: {gs.best_params_}")
@@ -494,7 +497,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                     # Decision Boundary on MSP PC1 vs FTIR PC1 (no labels on main plot)
                     best_params = gs.best_params_
                     if model_name == "FNN":
-                        model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=True, validation_fraction=0.1, **best_params)
+                        model_2d = MLPClassifier(max_iter=2000, random_state=42, early_stopping=False, **best_params)
                     elif model_name == "PLS-DA":
                         model_2d = PLSDA(**best_params)
                     else:
