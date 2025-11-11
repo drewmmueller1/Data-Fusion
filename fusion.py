@@ -277,7 +277,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         cm_test = confusion_matrix(y_test, y_test_pred)
                         fig_test, ax_test = plt.subplots(figsize=(10, 8))
                         disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
-                        disp_test.plot(ax=ax_test, xticks_rotation=45, yticks_rotation=45)
+                        disp_test.plot(ax=ax_test)
                         st.pyplot(fig_test)
 
                     if len(class_names) > 10:
@@ -293,7 +293,7 @@ if fusion_level == "Low-level (Preprocessed Spectra)":
                         cm_train = confusion_matrix(y_train, y_train_pred)
                         fig_train, ax_train = plt.subplots(figsize=(10, 8))
                         disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
-                        disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
+                        disp_train.plot(ax=ax_train)
                         st.pyplot(fig_train)
 
                     # Decision Boundary on 2D (fit new model on 2D with best params) - no labels on main plot
@@ -475,7 +475,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         cm_test = confusion_matrix(y_test, y_test_pred)
                         fig_test, ax_test = plt.subplots(figsize=(10, 8))
                         disp_test = ConfusionMatrixDisplay(cm_test, display_labels=class_names)
-                        disp_test.plot(ax=ax_test, xticks_rotation=45, yticks_rotation=45)
+                        disp_test.plot(ax=ax_test)
                         st.pyplot(fig_test)
 
                     if len(class_names) > 10:
@@ -491,7 +491,7 @@ elif fusion_level == "Mid-level (PCA Scores)":
                         cm_train = confusion_matrix(y_train, y_train_pred)
                         fig_train, ax_train = plt.subplots(figsize=(10, 8))
                         disp_train = ConfusionMatrixDisplay(cm_train, display_labels=class_names)
-                        disp_train.plot(ax=ax_train, xticks_rotation=45, yticks_rotation=45)
+                        disp_train.plot(ax=ax_train)
                         st.pyplot(fig_train)
 
                     # Decision Boundary on MSP PC1 vs FTIR PC1 (no labels on main plot)
